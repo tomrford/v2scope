@@ -1,100 +1,115 @@
 #ifndef VSCOPE_H
 #define VSCOPE_H
 
+#include <stddef.h>
 #include <stdint.h>
 
-#define VSCOPE_MEMORY 10501
-#define VSCOPE_DEFAULT_BUFFER_SIZE 1000
-#define VSCOPE_NUM_CHANNELS 10
-#define VSCOPE_MAX_NAME_LEN 40
-// Length of the fixed device identifier/name returned during handshake
+#ifndef VSCOPE_MAX_VARIABLES
+#define VSCOPE_MAX_VARIABLES 32
+#endif
+
+#ifndef VSCOPE_NUM_CHANNELS
+#define VSCOPE_NUM_CHANNELS 5
+#endif
+
+#ifndef VSCOPE_NAME_LEN
+#define VSCOPE_NAME_LEN 16
+#endif
+
+#ifndef VSCOPE_BUFFER_SIZE
+#define VSCOPE_BUFFER_SIZE 1000
+#endif
+
+#ifndef VSCOPE_MAX_PAYLOAD
+#define VSCOPE_MAX_PAYLOAD 512
+#endif
+
+#ifndef VSCOPE_DEVICE_NAME_LEN
 #define VSCOPE_DEVICE_NAME_LEN 10
+#endif
+
+#ifndef VSCOPE_FRAME_TIMEOUT_US
+#define VSCOPE_FRAME_TIMEOUT_US 5000
+#endif
+
+#ifndef VSCOPE_RT_BUFFER_LEN
+#define VSCOPE_RT_BUFFER_LEN 16
+#endif
+
+#ifndef VSCOPE_ASSERT
+#define VSCOPE_ASSERT(expr) ((void)0)
+#endif
+
+#define VSCOPE_SYNC_BYTE 0xC8
+#define VSCOPE_PROTOCOL_VERSION 1
 
 typedef enum {
-  VSCOPE_HALTED = 0,
-  VSCOPE_RUNNING = 1,
-  VSCOPE_ACQUIRING = 2,
-  VSCOPE_MISCONFIGURED = 3,
+    VSCOPE_HALTED = 0,
+    VSCOPE_RUNNING = 1,
+    VSCOPE_ACQUIRING = 2,
+    VSCOPE_MISCONFIGURED = 3,
 } VscopeState;
 
 typedef enum {
-  TRG_THRESHOLD = 0,
-  TRG_CHANNEL = 1,
-  TRG_MODE = 2,
-
-  RT_BUFFER_LENGTH = 16,
-} VscopeRtBufferIndexes;
-
-typedef enum {
-  VSCOPE_TRG_DISABLED = 0,
-  VSCOPE_TRG_RISING = 1,
-  VSCOPE_TRG_FALLING = 2,
-  VSCOPE_TRG_BOTH = 3,
+    VSCOPE_TRG_DISABLED = 0,
+    VSCOPE_TRG_RISING = 1,
+    VSCOPE_TRG_FALLING = 2,
+    VSCOPE_TRG_BOTH = 3,
 } VscopeTriggerMode;
 
 typedef struct {
-  VscopeState state;
-  VscopeState request;
+    uint32_t crc_fail;
+    uint32_t len_invalid;
+    uint32_t timeout;
+} VscopeErrors;
 
-  float *frame[VSCOPE_NUM_CHANNELS];
-  float buffer[VSCOPE_DEFAULT_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
+typedef struct {
+    VscopeState state;
+    VscopeState request;
 
-  uint32_t buffer_size;
-  uint32_t n_ch;
-  uint32_t divider;
-  uint32_t pre_trig;
-  uint32_t acq_time;
-  uint32_t index;
-  uint32_t first_element;
+    float* frame[VSCOPE_NUM_CHANNELS];
+    float buffer[VSCOPE_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
 
-  // Fixed-length device identifier returned in handshake (user should populate)
-  char device_name[VSCOPE_DEVICE_NAME_LEN];
+    uint32_t buffer_size;
+    uint32_t n_ch;
+    uint32_t divider;
+    uint32_t pre_trig;
+    uint32_t acq_time;
+    uint32_t index;
+    uint32_t first_element;
+
+    float trigger_threshold;
+    uint8_t trigger_channel;
+    VscopeTriggerMode trigger_mode;
+
+    char device_name[VSCOPE_DEVICE_NAME_LEN];
 } VscopeStruct;
 
 extern VscopeStruct vscope;
-extern char vscope_channel_names[VSCOPE_NUM_CHANNELS][VSCOPE_MAX_NAME_LEN];
 
-/**
- * @brief This function intialises the vscope module.
- **/
+// User-provided serial TX function (must be implemented in application).
+void vscopeTxBytes(const uint8_t* data, size_t len);
+
+// Variable registration (call before vscopeInit()).
+#define VSCOPE_REGISTER_VAR(var, display_name) vscopeRegisterVar((display_name), &(var))
+#define VSCOPE_REGISTER_BUF(var, display_name) vscopeRegisterRtBuffer((display_name), &(var))
+void vscopeRegisterVar(const char* name, float* ptr);
+void vscopeRegisterRtBuffer(const char* name, float* ptr);
+
+// Feed raw serial bytes into the parser.
+void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us);
+
 void vscopeInit(void);
-
-/**
- * @brief This function is used to store data in the vscope buffer when the
- *scope is running/triggered.
- **/
 void vscopeAcquire(void);
-
-/**
- * @brief Triggers the vscope if the state is 'running'.
- */
 void vscopeTrigger(void);
 
-/**
- * @brief Handles an incoming serial request.
- * @param msg a pointer to a char buffer. The function assumes the correct
- * length of 9 bytes.
- */
-void vscopeProcessMessage(char *msg);
+VscopeErrors vscopeGetErrors(void);
 
-/**
- * @brief Gets a given index.
- * @param index The index.
- * @return The value.
- */
-float vscopeGetRtBuffer(VscopeRtBufferIndexes index);
-
-/**
- * @brief Sets a given index to a given value.
- * @param index The index.
- * @param value The value.
- */
-void vscopeSetRtBuffer(VscopeRtBufferIndexes index, float value);
+float vscopeGetRtBuffer(uint8_t index);
+void vscopeSetRtBuffer(uint8_t index, float value);
 
 void vscopeSetTriggerThreshold(float threshold);
-
 void vscopeSetTriggerChannel(uint32_t channel);
-
 void vscopeSetTriggerMode(VscopeTriggerMode mode);
 
 #endif // VSCOPE_H

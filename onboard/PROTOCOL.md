@@ -1,107 +1,131 @@
-# VScope Serial Protocol
+# VScope Serial Protocol (CRSF-inspired)
 
-All messages follow a fixed 9-byte format: 1 byte message key + 8 bytes payload.
+## Framing
+
+```
+┌─────────┬────────────┬──────┬───────────┬─────┐
+│ SYNC    │ LEN        │ TYPE │ PAYLOAD   │ CRC │
+│ 0xC8    │ N+2        │ 1B   │ 0-512B    │ 1B  │
+└─────────┴────────────┴──────┴───────────┴─────┘
+```
+
+- **SYNC**: `0xC8`
+- **LEN**: 2 bytes little-endian, bytes after LEN (TYPE + PAYLOAD + CRC)
+- **CRC**: CRC8 DVB-S2 (poly `0xD5`), computed over TYPE + PAYLOAD
+- **Endianness**: little-endian for all multi-byte values
+- **Max payload**: 512 bytes (configurable)
+
+## Response format
+
+All responses use the **same TYPE** as the request. Payload begins with:
+
+- `status` byte:
+  - `0x00` = success
+  - `0x01+` = error code (no additional data)
 
 ## Message Types
 
-### HANDSHAKE (`h`)
+### `0x01` GET_INFO
+**Request:** empty payload  
+**Response data:**
 
-**Request:** `h` + 8 padding bytes  
-**Response:**
+- `u8` protocol_version
+- `u8` channel_count
+- `u16` buffer_size
+- `u8` var_count
+- `char[VSCOPE_DEVICE_NAME_LEN]` device_name (fixed length)
 
-- 2 bytes: Number of channels (uint16, little-endian)
-- 2 bytes: Buffer size (uint16, little-endian)
-- 10 bytes: Fixed-length device identifier string
+### `0x02` GET_TIMING
+**Request:** empty payload  
+**Response data:** `u32 divider`, `u32 pre_trig`
 
-Initiates communication and retrieves device configuration information.
+### `0x03` SET_TIMING
+**Request payload:** `u32 divider`, `u32 pre_trig`  
+**Response:** status
 
----
+### `0x04` GET_STATE
+**Request:** empty payload  
+**Response data:** `u8 state`
 
-### GET_TIMING (`t`)
+### `0x05` SET_STATE
+**Request payload:** `u8 state`  
+**Response:** status
 
-**Request:** `t` + 8 padding bytes  
-**Response:**
+Valid states:
+- `0` HALTED
+- `1` RUNNING
+- `2` ACQUIRING
+- `3` MISCONFIGURED (read-only)
 
-- 4 bytes: Divider value (uint32)
-- 4 bytes: Pre-trigger sample count (uint32)
+### `0x06` TRIGGER
+**Request:** empty payload  
+**Response:** status
 
-Retrieves the current timing configuration. The divider determines the sample rate (samples are taken every nth tick of the base polling rate). Pre-trigger defines how many samples are captured before the trigger event.
+### `0x07` GET_FRAME
+**Request:** empty payload  
+**Response data:** `float[VSCOPE_NUM_CHANNELS]` (mapped channels)
 
----
+### `0x08` GET_SNAPSHOT_HEADER
+**Request:** empty payload  
+**Response data:**
 
-### SET_TIMING (`T`)
+- `u8[VSCOPE_NUM_CHANNELS]` channel_map (var IDs)
+- `u16` first_element (trigger/oldest sample index)
+- `u16` sample_count (buffer_size)
+- `u16` pre_trig
 
-**Request:** `T` + 4 bytes divider (uint32) + 4 bytes pre-trigger (uint32)  
-**Response:** 1 byte (0 = success)
+### `0x09` GET_SNAPSHOT_DATA
+**Request payload:** `u16 start_sample`, `u8 sample_count`  
+**Response data:** `float[sample_count * VSCOPE_NUM_CHANNELS]`
 
-Sets the timing configuration. The acquisition time is automatically calculated as `buffer_size - pre_trigger`.
+Notes:
+- `start_sample` is relative to `first_element`
+- Host controls `sample_count` to adapt to noisy links
+- Max sample_count = `(VSCOPE_MAX_PAYLOAD - 1) / (VSCOPE_NUM_CHANNELS * 4)`
 
----
+### `0x0A` GET_VAR_LIST
+**Request payload (optional):**
 
-### GET_STATE (`s`)
+- `u8 start_idx` (default 0)
+- `u8 max_count` (default all)
 
-**Request:** `s` + 8 padding bytes  
-**Response:** 1 byte state value
+**Response data:**
 
-- 0 = HALTED
-- 1 = RUNNING (circular buffering)
-- 2 = ACQUIRING (capturing post-trigger samples)
-- 3 = MISCONFIGURED
+- `u8 total_count`
+- `u8 start_idx`
+- `u8 count`
+- Repeated `count` times:
+  - `u8 id`
+  - `char[VSCOPE_NAME_LEN]` name
 
-Retrieves the current operational state of the scope.
+### `0x0B` GET_CHANNEL_MAP
+**Request:** empty payload  
+**Response data:** `u8[VSCOPE_NUM_CHANNELS]` var IDs
 
----
+### `0x0C` SET_CHANNEL_MAP
+**Request payload:** `u8[VSCOPE_NUM_CHANNELS]` var IDs  
+**Response:** status
 
-### SET_STATE (`S`)
+### `0x0D` GET_CHANNEL_LABELS
+**Request:** empty payload  
+**Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_NUM_CHANNELS`
 
-**Request:** `S` + 7 padding bytes + 1 byte state (at index 8)  
-**Response:** 1 byte (0 = success, 1 = invalid state)
+### `0x0E` GET_RT_LABELS
+**Request:** empty payload  
+**Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_RT_BUFFER_LEN`
 
-Requests a state transition. Valid states are 0-2. State machine handles transitions via the internal `request` field.
+### `0x0F` GET_RT_BUFFER
+**Request payload:** `u8 index`  
+**Response data:** `float value`
 
----
+### `0x10` SET_RT_BUFFER
+**Request payload:** `u8 index`, `float value`  
+**Response:** status
 
-### GET_BUFF (`b`)
+## Error codes
 
-**Request:** `b` + 4 padding bytes + 4 bytes buffer index (uint32)  
-**Response:** 4 bytes float value (IEEE 754 single precision)
-
-Reads a single float32 value from the real-time buffer at the specified index. Used for live parameter monitoring.
-
----
-
-### SET_BUFF (`B`)
-
-**Request:** `B` + 4 bytes buffer index (uint32) + 4 bytes float32 value  
-**Response:** 1 byte (0 = success, 1 = invalid index)
-
-Writes a float32 value to the real-time buffer at the specified index. Used for live parameter adjustment and control.
-
----
-
-### GET_FRAME (`f`)
-
-**Request:** `f` + 8 padding bytes  
-**Response:** N × 4 bytes (N = number of channels)
-
-Returns the current frame data as an array of float32 values, one per channel. Provides a snapshot of the current signal values.
-
----
-
-### GET_LABEL (`l`)
-
-**Request:** `l` + 4 padding bytes + 4 bytes channel index (uint32)  
-**Response:** Variable-length null-terminated string (max 40 characters)
-
-Retrieves the label/name for a specific channel.
-
----
-
-### DOWNLOAD (`d`)
-
-**Request:** `d` + 8 padding bytes  
-**Response:** Buffer_size × N_channels × 4 bytes
-
-Downloads the complete circular buffer contents. Data is transmitted as sequential frames, starting from `first_element` (the trigger/oldest sample point) and wrapping around the circular buffer. Each frame contains all channel values as float32 in channel order.
-
----
+- `0x01` BAD_LEN
+- `0x02` BAD_PARAM
+- `0x03` BAD_STATE
+- `0x04` RANGE
+- `0x05` NOT_READY

@@ -1,0 +1,810 @@
+#include "vscope.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+typedef enum {
+    VSCOPE_STATUS_OK = 0,
+    VSCOPE_ERR_BAD_LEN = 1,
+    VSCOPE_ERR_BAD_PARAM = 2,
+    VSCOPE_ERR_BAD_STATE = 3,
+    VSCOPE_ERR_RANGE = 4,
+    VSCOPE_ERR_NOT_READY = 5,
+} VscopeStatus;
+
+typedef enum {
+    VSCOPE_MSG_GET_INFO = 0x01,
+    VSCOPE_MSG_GET_TIMING = 0x02,
+    VSCOPE_MSG_SET_TIMING = 0x03,
+    VSCOPE_MSG_GET_STATE = 0x04,
+    VSCOPE_MSG_SET_STATE = 0x05,
+    VSCOPE_MSG_TRIGGER = 0x06,
+    VSCOPE_MSG_GET_FRAME = 0x07,
+    VSCOPE_MSG_GET_SNAPSHOT_HEADER = 0x08,
+    VSCOPE_MSG_GET_SNAPSHOT_DATA = 0x09,
+    VSCOPE_MSG_GET_VAR_LIST = 0x0A,
+    VSCOPE_MSG_GET_CHANNEL_MAP = 0x0B,
+    VSCOPE_MSG_SET_CHANNEL_MAP = 0x0C,
+    VSCOPE_MSG_GET_CHANNEL_LABELS = 0x0D,
+    VSCOPE_MSG_GET_RT_LABELS = 0x0E,
+    VSCOPE_MSG_GET_RT_BUFFER = 0x0F,
+    VSCOPE_MSG_SET_RT_BUFFER = 0x10,
+    VSCOPE_MSG_GET_TRIGGER = 0x11,
+    VSCOPE_MSG_SET_TRIGGER = 0x12,
+} VscopeMessageType;
+
+typedef enum {
+    VS_RX_IDLE = 0,
+    VS_RX_LEN_LO = 1,
+    VS_RX_LEN_HI = 2,
+    VS_RX_DATA = 3,
+} VscopeRxState;
+
+typedef struct {
+    char name[VSCOPE_NAME_LEN];
+    float* ptr;
+} VscopeVar;
+
+VscopeStruct vscope;
+
+static VscopeErrors vscope_errors;
+
+static VscopeVar var_catalog[VSCOPE_MAX_VARIABLES];
+static uint8_t var_count;
+static bool registration_locked;
+
+static uint8_t channel_map[VSCOPE_NUM_CHANNELS];
+static float *rt_values[VSCOPE_RT_BUFFER_LEN];
+static char rt_names[VSCOPE_RT_BUFFER_LEN][VSCOPE_NAME_LEN];
+static uint8_t rt_count;
+static float vscope_zero_value = 0.0f;
+
+static VscopeRxState rx_state;
+static uint16_t rx_expected_len;
+static uint16_t rx_index;
+static uint32_t rx_last_us;
+static uint8_t rx_buf[VSCOPE_MAX_PAYLOAD + 2];
+
+static const uint8_t crc8_lut[256] = {
+    0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D, 0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79,
+    0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F, 0xA4, 0x71, 0xDB, 0x0E, 0x5A, 0x8F, 0x25, 0xF0, 0x8D, 0x58, 0xF2, 0x27,
+    0x73, 0xA6, 0x0C, 0xD9, 0xF6, 0x23, 0x89, 0x5C, 0x08, 0xDD, 0x77, 0xA2, 0xDF, 0x0A, 0xA0, 0x75, 0x21, 0xF4, 0x5E, 0x8B, 0x9D, 0x48,
+    0xE2, 0x37, 0x63, 0xB6, 0x1C, 0xC9, 0xB4, 0x61, 0xCB, 0x1E, 0x4A, 0x9F, 0x35, 0xE0, 0xCF, 0x1A, 0xB0, 0x65, 0x31, 0xE4, 0x4E, 0x9B,
+    0xE6, 0x33, 0x99, 0x4C, 0x18, 0xCD, 0x67, 0xB2, 0x39, 0xEC, 0x46, 0x93, 0xC7, 0x12, 0xB8, 0x6D, 0x10, 0xC5, 0x6F, 0xBA, 0xEE, 0x3B,
+    0x91, 0x44, 0x6B, 0xBE, 0x14, 0xC1, 0x95, 0x40, 0xEA, 0x3F, 0x42, 0x97, 0x3D, 0xE8, 0xBC, 0x69, 0xC3, 0x16, 0xEF, 0x3A, 0x90, 0x45,
+    0x11, 0xC4, 0x6E, 0xBB, 0xC6, 0x13, 0xB9, 0x6C, 0x38, 0xED, 0x47, 0x92, 0xBD, 0x68, 0xC2, 0x17, 0x43, 0x96, 0x3C, 0xE9, 0x94, 0x41,
+    0xEB, 0x3E, 0x6A, 0xBF, 0x15, 0xC0, 0x4B, 0x9E, 0x34, 0xE1, 0xB5, 0x60, 0xCA, 0x1F, 0x62, 0xB7, 0x1D, 0xC8, 0x9C, 0x49, 0xE3, 0x36,
+    0x19, 0xCC, 0x66, 0xB3, 0xE7, 0x32, 0x98, 0x4D, 0x30, 0xE5, 0x4F, 0x9A, 0xCE, 0x1B, 0xB1, 0x64, 0x72, 0xA7, 0x0D, 0xD8, 0x8C, 0x59,
+    0xF3, 0x26, 0x5B, 0x8E, 0x24, 0xF1, 0xA5, 0x70, 0xDA, 0x0F, 0x20, 0xF5, 0x5F, 0x8A, 0xDE, 0x0B, 0xA1, 0x74, 0x09, 0xDC, 0x76, 0xA3,
+    0xF7, 0x22, 0x88, 0x5D, 0xD6, 0x03, 0xA9, 0x7C, 0x28, 0xFD, 0x57, 0x82, 0xFF, 0x2A, 0x80, 0x55, 0x01, 0xD4, 0x7E, 0xAB, 0x84, 0x51,
+    0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9,
+};
+
+static uint8_t vscope_crc8(const uint8_t* data, uint16_t len) {
+    uint8_t crc = 0;
+    for (uint16_t i = 0; i < len; i += 1U) {
+        crc = crc8_lut[crc ^ data[i]];
+    }
+    return crc;
+}
+
+static uint16_t vscope_read_u16(const uint8_t* data) {
+    return (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
+}
+
+static uint32_t vscope_read_u32(const uint8_t* data) {
+    return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+}
+
+static float vscope_read_f32(const uint8_t* data) {
+    uint32_t raw = vscope_read_u32(data);
+    float value = 0.0f;
+    memcpy(&value, &raw, sizeof(float));
+    return value;
+}
+
+static void vscope_write_u16(uint8_t* data, uint16_t value) {
+    data[0] = (uint8_t)(value & 0xFF);
+    data[1] = (uint8_t)((value >> 8) & 0xFF);
+}
+
+static void vscope_write_u32(uint8_t* data, uint32_t value) {
+    data[0] = (uint8_t)(value & 0xFF);
+    data[1] = (uint8_t)((value >> 8) & 0xFF);
+    data[2] = (uint8_t)((value >> 16) & 0xFF);
+    data[3] = (uint8_t)((value >> 24) & 0xFF);
+}
+
+static void vscope_write_f32(uint8_t* data, float value) {
+    uint32_t raw = 0;
+    memcpy(&raw, &value, sizeof(float));
+    vscope_write_u32(data, raw);
+}
+
+static void vscope_write_str_fixed(uint8_t* dest, const char* src, size_t len) {
+    memset(dest, 0, len);
+    if (src == NULL) {
+        return;
+    }
+    strncpy((char*)dest, src, len - 1U);
+}
+
+static uint16_t vscope_min_u16(uint16_t a, uint16_t b) {
+    return (a < b) ? a : b;
+}
+
+static void vscope_reset_rx(bool count_timeout) {
+    if (count_timeout && rx_state != VS_RX_IDLE && rx_index > 0U) {
+        vscope_errors.timeout += 1U;
+    }
+    rx_state = VS_RX_IDLE;
+    rx_expected_len = 0U;
+    rx_index = 0U;
+}
+
+static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len > VSCOPE_MAX_PAYLOAD) {
+        return;
+    }
+
+    uint8_t frame[VSCOPE_MAX_PAYLOAD + 5];
+    uint16_t len_field = (uint16_t)(payload_len + 2U);
+    uint16_t offset = 0U;
+
+    frame[offset++] = (uint8_t)VSCOPE_SYNC_BYTE;
+    frame[offset++] = (uint8_t)(len_field & 0xFF);
+    frame[offset++] = (uint8_t)((len_field >> 8) & 0xFF);
+    frame[offset++] = type;
+
+    if (payload_len > 0U) {
+        memcpy(&frame[offset], payload, payload_len);
+        offset = (uint16_t)(offset + payload_len);
+    }
+
+    frame[offset++] = vscope_crc8(&frame[3], (uint16_t)(payload_len + 1U));
+
+    vscopeTxBytes(frame, offset);
+}
+
+static void vscope_send_status(uint8_t type, uint8_t status) {
+    uint8_t payload[1];
+    payload[0] = status;
+    vscope_send_frame(type, payload, sizeof(payload));
+}
+
+static void vscope_send_status_with_data(uint8_t type, const uint8_t* data, uint16_t data_len) {
+    if ((uint16_t)(data_len + 1U) > VSCOPE_MAX_PAYLOAD) {
+        vscope_send_status(type, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t payload[VSCOPE_MAX_PAYLOAD];
+    payload[0] = VSCOPE_STATUS_OK;
+    if (data_len > 0U) {
+        memcpy(&payload[1], data, data_len);
+    }
+    vscope_send_frame(type, payload, (uint16_t)(data_len + 1U));
+}
+
+static uint8_t vscope_get_mapped_channel(uint8_t channel) {
+    if (channel >= VSCOPE_NUM_CHANNELS) {
+        return 0U;
+    }
+    return channel_map[channel];
+}
+
+static bool vscope_update_channel_map(const uint8_t* ids) {
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        if (ids[i] >= var_count) {
+            return false;
+        }
+    }
+
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        channel_map[i] = ids[i];
+        vscope.frame[i] = var_catalog[ids[i]].ptr;
+    }
+
+    return true;
+}
+
+static void vscope_handle_get_info(void) {
+    uint8_t data[1 + 1 + 2 + 1 + VSCOPE_DEVICE_NAME_LEN];
+    uint16_t offset = 0U;
+
+    data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
+    data[offset++] = (uint8_t)vscope.n_ch;
+    vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
+    offset = (uint16_t)(offset + 2U);
+    data[offset++] = var_count;
+    vscope_write_str_fixed(&data[offset], vscope.device_name, VSCOPE_DEVICE_NAME_LEN);
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_INFO, data, sizeof(data));
+}
+
+static void vscope_handle_get_timing(void) {
+    uint8_t data[8];
+    vscope_write_u32(&data[0], vscope.divider);
+    vscope_write_u32(&data[4], vscope.pre_trig);
+    vscope_send_status_with_data(VSCOPE_MSG_GET_TIMING, data, sizeof(data));
+}
+
+static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 8U) {
+        vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint32_t divider = vscope_read_u32(&payload[0]);
+    uint32_t pre_trig = vscope_read_u32(&payload[4]);
+
+    if (divider == 0U || pre_trig > vscope.buffer_size) {
+        vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    vscope.divider = divider;
+    vscope.pre_trig = pre_trig;
+    vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
+    vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_get_state(void) {
+    uint8_t data[1];
+    data[0] = (uint8_t)vscope.state;
+    vscope_send_status_with_data(VSCOPE_MSG_GET_STATE, data, sizeof(data));
+}
+
+static void vscope_handle_set_state(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len < 1U) {
+        vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t requested = payload[0];
+    if (requested > VSCOPE_ACQUIRING) {
+        vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    vscope.request = (VscopeState)requested;
+    vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_trigger(void) {
+    vscopeTrigger();
+    vscope_send_status(VSCOPE_MSG_TRIGGER, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_get_frame(void) {
+    uint8_t data[VSCOPE_NUM_CHANNELS * 4];
+    uint16_t offset = 0U;
+
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        vscope_write_f32(&data[offset], *(vscope.frame[i]));
+        offset = (uint16_t)(offset + 4U);
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_FRAME, data, sizeof(data));
+}
+
+static void vscope_handle_get_snapshot_header(void) {
+    uint8_t data[VSCOPE_NUM_CHANNELS + 6];
+    uint16_t offset = 0U;
+
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        data[offset++] = channel_map[i];
+    }
+
+    vscope_write_u16(&data[offset], (uint16_t)vscope.first_element);
+    offset = (uint16_t)(offset + 2U);
+    vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
+    offset = (uint16_t)(offset + 2U);
+    vscope_write_u16(&data[offset], (uint16_t)vscope.pre_trig);
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_HEADER, data, sizeof(data));
+}
+
+static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len < 3U) {
+        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint16_t start_sample = vscope_read_u16(payload);
+    uint8_t requested_count = payload[2];
+
+    if (start_sample >= vscope.buffer_size || requested_count == 0U || requested_count > vscope.buffer_size) {
+        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    uint16_t max_samples = (uint16_t)((VSCOPE_MAX_PAYLOAD - 1U) / (VSCOPE_NUM_CHANNELS * 4U));
+    if (requested_count > max_samples) {
+        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t data[VSCOPE_MAX_PAYLOAD];
+    uint16_t offset = 0U;
+
+    for (uint8_t i = 0U; i < requested_count; i += 1U) {
+        uint16_t sample_index = (uint16_t)((vscope.first_element + start_sample + i) % vscope.buffer_size);
+        for (uint8_t ch = 0U; ch < VSCOPE_NUM_CHANNELS; ch += 1U) {
+            vscope_write_f32(&data[offset], vscope.buffer[sample_index][ch]);
+            offset = (uint16_t)(offset + 4U);
+        }
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_DATA, data, offset);
+}
+
+static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_len) {
+    uint8_t start_idx = 0U;
+    uint8_t requested_count = 0xFFU;
+
+    if (payload_len >= 1U) {
+        start_idx = payload[0];
+    }
+    if (payload_len >= 2U) {
+        requested_count = payload[1];
+    }
+
+    if (start_idx >= var_count) {
+        vscope_send_status(VSCOPE_MSG_GET_VAR_LIST, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    uint16_t entry_size = (uint16_t)(1U + VSCOPE_NAME_LEN);
+    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 1U - 3U) / entry_size);
+    uint16_t available = (uint16_t)(var_count - start_idx);
+    uint16_t desired = (requested_count == 0xFFU) ? available : requested_count;
+    uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
+
+    uint8_t data[VSCOPE_MAX_PAYLOAD];
+    uint16_t offset = 0U;
+    data[offset++] = var_count;
+    data[offset++] = start_idx;
+    data[offset++] = (uint8_t)count;
+
+    for (uint16_t i = 0U; i < count; i += 1U) {
+        uint8_t id = (uint8_t)(start_idx + i);
+        data[offset++] = id;
+        vscope_write_str_fixed(&data[offset], var_catalog[id].name, VSCOPE_NAME_LEN);
+        offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_VAR_LIST, data, offset);
+}
+
+static void vscope_handle_get_channel_map(void) {
+    uint8_t data[VSCOPE_NUM_CHANNELS];
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        data[i] = channel_map[i];
+    }
+    vscope_send_status_with_data(VSCOPE_MSG_GET_CHANNEL_MAP, data, sizeof(data));
+}
+
+static void vscope_handle_set_channel_map(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != VSCOPE_NUM_CHANNELS) {
+        vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    if (!vscope_update_channel_map(payload)) {
+        vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_get_channel_labels(void) {
+    uint8_t data[VSCOPE_NUM_CHANNELS * VSCOPE_NAME_LEN];
+    uint16_t offset = 0U;
+
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        uint8_t id = vscope_get_mapped_channel(i);
+        if (id < var_count) {
+            vscope_write_str_fixed(&data[offset], var_catalog[id].name, VSCOPE_NAME_LEN);
+        } else {
+            memset(&data[offset], 0, VSCOPE_NAME_LEN);
+        }
+        offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_CHANNEL_LABELS, data, sizeof(data));
+}
+
+static void vscope_handle_get_rt_labels(void) {
+    uint8_t data[VSCOPE_RT_BUFFER_LEN * VSCOPE_NAME_LEN];
+    uint16_t offset = 0U;
+
+    for (uint8_t i = 0U; i < VSCOPE_RT_BUFFER_LEN; i += 1U) {
+        if (i < rt_count) {
+            vscope_write_str_fixed(&data[offset], rt_names[i], VSCOPE_NAME_LEN);
+        } else {
+            memset(&data[offset], 0, VSCOPE_NAME_LEN);
+        }
+        offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_RT_LABELS, data, sizeof(data));
+}
+
+static void vscope_handle_get_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len < 1U) {
+        vscope_send_status(VSCOPE_MSG_GET_RT_BUFFER, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t idx = payload[0];
+    if (idx >= rt_count) {
+        vscope_send_status(VSCOPE_MSG_GET_RT_BUFFER, VSCOPE_ERR_RANGE);
+        return;
+    }
+
+    uint8_t data[4];
+    vscope_write_f32(data, *(rt_values[idx]));
+    vscope_send_status_with_data(VSCOPE_MSG_GET_RT_BUFFER, data, sizeof(data));
+}
+
+static void vscope_handle_set_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 5U) {
+        vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t idx = payload[0];
+    if (idx >= rt_count) {
+        vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_ERR_RANGE);
+        return;
+    }
+
+    float value = vscope_read_f32(&payload[1]);
+    *(rt_values[idx]) = value;
+    vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_get_trigger(void) {
+    uint8_t data[6];
+    vscope_write_f32(&data[0], vscope.trigger_threshold);
+    data[4] = vscope.trigger_channel;
+    data[5] = (uint8_t)vscope.trigger_mode;
+    vscope_send_status_with_data(VSCOPE_MSG_GET_TRIGGER, data, sizeof(data));
+}
+
+static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 6U) {
+        vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    float threshold = vscope_read_f32(&payload[0]);
+    uint8_t channel = payload[4];
+    uint8_t mode = payload[5];
+
+    if (channel >= VSCOPE_NUM_CHANNELS || mode > (uint8_t)VSCOPE_TRG_BOTH) {
+        vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    vscope.trigger_threshold = threshold;
+    vscope.trigger_channel = channel;
+    vscope.trigger_mode = (VscopeTriggerMode)mode;
+    vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_STATUS_OK);
+}
+
+static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t payload_len) {
+    switch (type) {
+        case VSCOPE_MSG_GET_INFO:
+            vscope_handle_get_info();
+            break;
+        case VSCOPE_MSG_GET_TIMING:
+            vscope_handle_get_timing();
+            break;
+        case VSCOPE_MSG_SET_TIMING:
+            vscope_handle_set_timing(payload, payload_len);
+            break;
+        case VSCOPE_MSG_GET_STATE:
+            vscope_handle_get_state();
+            break;
+        case VSCOPE_MSG_SET_STATE:
+            vscope_handle_set_state(payload, payload_len);
+            break;
+        case VSCOPE_MSG_TRIGGER:
+            vscope_handle_trigger();
+            break;
+        case VSCOPE_MSG_GET_FRAME:
+            vscope_handle_get_frame();
+            break;
+        case VSCOPE_MSG_GET_SNAPSHOT_HEADER:
+            vscope_handle_get_snapshot_header();
+            break;
+        case VSCOPE_MSG_GET_SNAPSHOT_DATA:
+            vscope_handle_get_snapshot_data(payload, payload_len);
+            break;
+        case VSCOPE_MSG_GET_VAR_LIST:
+            vscope_handle_get_var_list(payload, payload_len);
+            break;
+        case VSCOPE_MSG_GET_CHANNEL_MAP:
+            vscope_handle_get_channel_map();
+            break;
+        case VSCOPE_MSG_SET_CHANNEL_MAP:
+            vscope_handle_set_channel_map(payload, payload_len);
+            break;
+        case VSCOPE_MSG_GET_CHANNEL_LABELS:
+            vscope_handle_get_channel_labels();
+            break;
+        case VSCOPE_MSG_GET_RT_LABELS:
+            vscope_handle_get_rt_labels();
+            break;
+        case VSCOPE_MSG_GET_RT_BUFFER:
+            vscope_handle_get_rt_buffer(payload, payload_len);
+            break;
+        case VSCOPE_MSG_SET_RT_BUFFER:
+            vscope_handle_set_rt_buffer(payload, payload_len);
+            break;
+        case VSCOPE_MSG_GET_TRIGGER:
+            vscope_handle_get_trigger();
+            break;
+        case VSCOPE_MSG_SET_TRIGGER:
+            vscope_handle_set_trigger(payload, payload_len);
+            break;
+        default:
+            vscope_send_status(type, VSCOPE_ERR_BAD_PARAM);
+            break;
+    }
+}
+
+void vscopeRegisterVar(const char* name, float* ptr) {
+    if (registration_locked || var_count >= VSCOPE_MAX_VARIABLES || ptr == NULL) {
+        return;
+    }
+
+    memset(var_catalog[var_count].name, 0, VSCOPE_NAME_LEN);
+    if (name != NULL) {
+        strncpy(var_catalog[var_count].name, name, VSCOPE_NAME_LEN - 1U);
+    }
+    var_catalog[var_count].ptr = ptr;
+    var_count += 1U;
+}
+
+void vscopeRegisterRtBuffer(const char* name, float* ptr) {
+    if (registration_locked || rt_count >= VSCOPE_RT_BUFFER_LEN || ptr == NULL) {
+        return;
+    }
+
+    memset(rt_names[rt_count], 0, VSCOPE_NAME_LEN);
+    if (name != NULL) {
+        strncpy(rt_names[rt_count], name, VSCOPE_NAME_LEN - 1U);
+    }
+    rt_values[rt_count] = ptr;
+    rt_count += 1U;
+}
+
+void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
+    if (data == NULL || len == 0U) {
+        return;
+    }
+
+    if (rx_state != VS_RX_IDLE && (uint32_t)(now_us - rx_last_us) > VSCOPE_FRAME_TIMEOUT_US) {
+        vscope_reset_rx(true);
+    }
+
+    for (size_t i = 0U; i < len; i += 1U) {
+        uint8_t byte = data[i];
+
+        switch (rx_state) {
+            case VS_RX_IDLE:
+                if (byte == (uint8_t)VSCOPE_SYNC_BYTE) {
+                    rx_state = VS_RX_LEN_LO;
+                    rx_last_us = now_us;
+                }
+                break;
+            case VS_RX_LEN_LO:
+                rx_expected_len = byte;
+                rx_state = VS_RX_LEN_HI;
+                rx_last_us = now_us;
+                break;
+            case VS_RX_LEN_HI:
+                rx_expected_len |= (uint16_t)((uint16_t)byte << 8);
+                if (rx_expected_len < 2U || rx_expected_len > (uint16_t)(VSCOPE_MAX_PAYLOAD + 2U)) {
+                    vscope_errors.len_invalid += 1U;
+                    vscope_reset_rx(false);
+                } else {
+                    rx_index = 0U;
+                    rx_state = VS_RX_DATA;
+                }
+                rx_last_us = now_us;
+                break;
+            case VS_RX_DATA:
+                rx_buf[rx_index++] = byte;
+                rx_last_us = now_us;
+                if (rx_index >= rx_expected_len) {
+                    uint8_t crc = rx_buf[rx_expected_len - 1U];
+                    uint8_t calc = vscope_crc8(rx_buf, (uint16_t)(rx_expected_len - 1U));
+                    if (crc == calc) {
+                        uint8_t type = rx_buf[0];
+                        const uint8_t* payload = &rx_buf[1];
+                        uint16_t payload_len = (uint16_t)(rx_expected_len - 2U);
+                        vscope_handle_frame(type, payload, payload_len);
+                    } else {
+                        vscope_errors.crc_fail += 1U;
+                    }
+                    vscope_reset_rx(false);
+                }
+                break;
+            default:
+                vscope_reset_rx(false);
+                break;
+        }
+    }
+}
+
+void vscopeInit(void) {
+    memset(&vscope, 0, sizeof(vscope));
+    memset(&vscope_errors, 0, sizeof(vscope_errors));
+
+    vscope.state = VSCOPE_HALTED;
+    vscope.request = VSCOPE_HALTED;
+    vscope.buffer_size = VSCOPE_BUFFER_SIZE;
+    vscope.n_ch = VSCOPE_NUM_CHANNELS;
+    vscope.pre_trig = 0U;
+    vscope.divider = 1U;
+    vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
+
+    vscope.index = 0U;
+    vscope.first_element = 0U;
+
+    memset(vscope.device_name, 0, VSCOPE_DEVICE_NAME_LEN);
+    snprintf(vscope.device_name, VSCOPE_DEVICE_NAME_LEN, "VScope");
+
+    registration_locked = true;
+    if (var_count < VSCOPE_NUM_CHANNELS) {
+        vscope.state = VSCOPE_MISCONFIGURED;
+    }
+
+    if (var_count == 0U) {
+        for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+            channel_map[i] = 0U;
+            vscope.frame[i] = &vscope_zero_value;
+        }
+    } else {
+        for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+            channel_map[i] = (i < var_count) ? i : 0U;
+            vscope.frame[i] = var_catalog[channel_map[i]].ptr;
+        }
+    }
+
+    memset(vscope.buffer, 0, sizeof(vscope.buffer));
+
+    vscope.trigger_threshold = 0.0f;
+    vscope.trigger_channel = 0U;
+    vscope.trigger_mode = VSCOPE_TRG_DISABLED;
+}
+
+static void vscope_save_frame(void) {
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        vscope.buffer[vscope.index][i] = *(vscope.frame[i]);
+    }
+
+    vscope.index += 1U;
+    if (vscope.index >= vscope.buffer_size) {
+        vscope.index = 0U;
+    }
+}
+
+static void vscope_check_trigger(void) {
+    static float last_delta = 0.0f;
+
+    float current_delta = *(vscope.frame[vscope.trigger_channel]) - vscope.trigger_threshold;
+
+    if (vscope.trigger_mode == VSCOPE_TRG_DISABLED) {
+        last_delta = current_delta;
+        return;
+    }
+
+    if ((current_delta * last_delta) < 0.0f) {
+        if (current_delta > 0.0f) {
+            if (vscope.trigger_mode != VSCOPE_TRG_FALLING) {
+                vscopeTrigger();
+            }
+        } else {
+            if (vscope.trigger_mode != VSCOPE_TRG_RISING) {
+                vscopeTrigger();
+            }
+        }
+    }
+
+    last_delta = current_delta;
+}
+
+void vscopeAcquire(void) {
+    static uint16_t divider_ticks = 0U;
+    static uint16_t run_index = 0U;
+
+    divider_ticks += 1U;
+    if (divider_ticks < vscope.divider) {
+        return;
+    }
+    divider_ticks = 0U;
+
+    vscope_check_trigger();
+
+    switch (vscope.state) {
+        case VSCOPE_HALTED:
+            vscope.index = 0U;
+            if (vscope.request == VSCOPE_RUNNING) {
+                vscope.state = VSCOPE_RUNNING;
+            }
+            break;
+        case VSCOPE_RUNNING:
+            if (vscope.request == VSCOPE_HALTED) {
+                vscope.state = VSCOPE_HALTED;
+            }
+            if (vscope.request == VSCOPE_ACQUIRING) {
+                if (vscope.acq_time == 0U) {
+                    vscope.state = VSCOPE_HALTED;
+                    vscope.first_element = vscope.index;
+                } else {
+                    vscope.state = VSCOPE_ACQUIRING;
+                    run_index = 1U;
+                }
+            }
+            vscope_save_frame();
+            break;
+        case VSCOPE_ACQUIRING:
+            if (run_index == vscope.acq_time) {
+                vscope.state = VSCOPE_HALTED;
+                vscope.first_element = vscope.index;
+            } else {
+                run_index += 1U;
+                vscope_save_frame();
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+void vscopeTrigger(void) {
+    if (vscope.state == VSCOPE_RUNNING) {
+        vscope.request = VSCOPE_ACQUIRING;
+    }
+}
+
+VscopeErrors vscopeGetErrors(void) {
+    return vscope_errors;
+}
+
+float vscopeGetRtBuffer(uint8_t index) {
+    if (index >= rt_count) {
+        return 0.0f;
+    }
+    return *(rt_values[index]);
+}
+
+void vscopeSetRtBuffer(uint8_t index, float value) {
+    if (index >= rt_count) {
+        return;
+    }
+    *(rt_values[index]) = value;
+}
+
+void vscopeSetTriggerThreshold(float threshold) {
+    vscope.trigger_threshold = threshold;
+}
+
+void vscopeSetTriggerChannel(uint32_t channel) {
+    VSCOPE_ASSERT(channel < VSCOPE_NUM_CHANNELS);
+    if (channel >= VSCOPE_NUM_CHANNELS) {
+        return;
+    }
+    vscope.trigger_channel = (uint8_t)channel;
+}
+
+void vscopeSetTriggerMode(VscopeTriggerMode mode) {
+    vscope.trigger_mode = mode;
+}
