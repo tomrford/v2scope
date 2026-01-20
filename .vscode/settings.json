@@ -3,7 +3,6 @@
   "rust-analyzer.linkedProjects": [
     "src-tauri/Cargo.toml"
   ],
-  "rust-analyzer.procMacro.enable": false,
   "files.watcherExclude": {
     "**/node_modules/**": true,
     "**/dist/**": true,
