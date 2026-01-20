@@ -3,17 +3,21 @@
 ## Framing
 
 ```
-┌─────────┬────────────┬──────┬───────────┬─────┐
-│ SYNC    │ LEN        │ TYPE │ PAYLOAD   │ CRC │
-│ 0xC8    │ N+2        │ 1B   │ 0-512B    │ 1B  │
-└─────────┴────────────┴──────┴───────────┴─────┘
+┌─────────┬─────┬──────┬───────────┬─────┐
+│ SYNC    │ LEN │ TYPE │ PAYLOAD   │ CRC │
+│ 0xC8    │ N+2 │ 1B   │ 0-253B    │ 1B  │
+└─────────┴─────┴──────┴───────────┴─────┘
 ```
 
 - **SYNC**: `0xC8`
-- **LEN**: 2 bytes little-endian, bytes after LEN (TYPE + PAYLOAD + CRC)
+- **LEN**: 1 byte, count of bytes after LEN (TYPE + PAYLOAD + CRC), max 255
 - **CRC**: CRC8 DVB-S2 (poly `0xD5`), computed over TYPE + PAYLOAD
 - **Endianness**: little-endian for all multi-byte values
-- **Max payload**: 512 bytes (configurable)
+- **Max payload**: 253 bytes (255 - TYPE - CRC)
+
+**Practical limits**:
+- 63 float32 samples per snapshot chunk (252 bytes)
+- 15 variable labels per GET_VAR_LIST page (15 × 17 = 255 bytes)
 
 ## Response format
 
