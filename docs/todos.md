@@ -6,19 +6,20 @@ Items identified during code review of Rust and C implementations.
 
 ### Revert LEN field to 1 byte
 - **Current**: LEN is `u16` (2 bytes), allows up to 65535 byte payloads
-- **Target**: LEN is `u8` (1 byte), max 255 bytes after LEN field
-- **Impact**: Max payload = 255 - 2 (type + crc) = 253 bytes
+- **Target**: LEN is `u8` (1 byte), count of bytes after LEN (TYPE + PAYLOAD + CRC), range 2-254
+- **Impact**: Max payload = 252 bytes (256-byte total frame cap)
 - **Calculations**:
-  - 63 fp32s per chunk (252 bytes)
-  - 158 chunks for 1000-sample download (1000 / 63 × 5 channels)
-  - 15 labels per message (15 × 16 = 240 bytes)
+  - 63 fp32s per payload (252 bytes)
+  - 84 chunks for 1000-sample download (1000 / 12 samples per chunk with 5 channels)
+  - 14 labels per message (3-byte header + 14 × 17 = 241 bytes)
 
 **Files to update**:
-- [ ] `onboard/vscope.h`: Change `VSCOPE_MAX_PAYLOAD` from 512 to 253
-- [ ] `onboard/vscope.c`: Update `vscope_send_frame()` to use 1-byte LEN
-- [ ] `onboard/vscope.c`: Update `vscopeFeed()` RX state machine (remove VS_RX_LEN_HI state)
-- [ ] `src-tauri/src/serial.rs`: Update `build_frame()` and `read_frame()` for 1-byte LEN
-- [ ] `onboard/PROTOCOL.md`: Update framing diagram and descriptions
+- [x] `onboard/vscope.h`: Change `VSCOPE_MAX_PAYLOAD` from 512 to 252
+- [x] `onboard/vscope.c`: Update `vscope_send_frame()` to use 1-byte LEN
+- [x] `onboard/vscope.c`: Update `vscopeFeed()` RX state machine (remove VS_RX_LEN_HI state)
+- [x] `src-tauri/src/serial.rs`: Update `build_frame()` and `read_frame()` for 1-byte LEN
+- [x] `onboard/PROTOCOL.md`: Update framing diagram and descriptions
+- [x] Remove status byte; add error frame `0xFF` with `error_code` payload
 
 ### CRC scope verification
 - **Status**: ✅ Correct - CRC covers TYPE + PAYLOAD only (matches CRSF spec)
@@ -53,20 +54,20 @@ Items identified during code review of Rust and C implementations.
 - **Location**: Line 777-781
 - **Issue**: `divider_ticks` is `uint16_t` but `vscope.divider` is `uint32_t`
 - **Risk**: If divider > 65535, comparison never true after overflow
-- [ ] Change `divider_ticks` to `uint32_t`, OR
+- [x] Change `divider_ticks` to `uint32_t`, OR
 - [ ] Add validation to clamp divider to UINT16_MAX
 
 ### GET_SNAPSHOT_DATA bounds check
 - **Location**: Line 383-388
 - **Issue**: No check for `start_sample + requested_count > buffer_size`
 - **Risk**: Reads valid buffer indices (modulo) but semantically past snapshot boundary
-- [ ] Add bounds validation: `start_sample + requested_count <= buffer_size`
+- [x] Add bounds validation: `start_sample + requested_count <= buffer_size`
 
 ### RT labels response size
 - **Location**: Lines 471-485
 - **Issue**: Returns all 16 slots even if only `rt_count` are registered (zeroed padding)
 - **Impact**: Wastes bandwidth; client must use `rt_count` from GET_INFO
-- **Decision**: Acceptable, but document that client should respect `rt_count`
+- [x] Page `GET_RT_LABELS` like `GET_VAR_LIST` to fit payload limits
 
 ### last_delta static variable
 - **Location**: Line 752

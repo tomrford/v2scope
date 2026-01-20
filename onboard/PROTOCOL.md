@@ -5,27 +5,30 @@
 ```
 ┌─────────┬─────┬──────┬───────────┬─────┐
 │ SYNC    │ LEN │ TYPE │ PAYLOAD   │ CRC │
-│ 0xC8    │ N+2 │ 1B   │ 0-253B    │ 1B  │
+│ 0xC8    │ N+2 │ 1B   │ 0-252B    │ 1B  │
 └─────────┴─────┴──────┴───────────┴─────┘
 ```
 
 - **SYNC**: `0xC8`
-- **LEN**: 1 byte, count of bytes after LEN (TYPE + PAYLOAD + CRC), max 255
+- **LEN**: 1 byte, count of bytes after LEN (TYPE + PAYLOAD + CRC), range 2-254
 - **CRC**: CRC8 DVB-S2 (poly `0xD5`), computed over TYPE + PAYLOAD
 - **Endianness**: little-endian for all multi-byte values
-- **Max payload**: 253 bytes (255 - TYPE - CRC)
+- **Max payload**: 252 bytes (254 - TYPE - CRC)
+- **Max frame size**: 256 bytes (SYNC + LEN + 254)
 
 **Practical limits**:
-- 63 float32 samples per snapshot chunk (252 bytes)
-- 15 variable labels per GET_VAR_LIST page (15 × 17 = 255 bytes)
+- 63 float32 values per payload (252 bytes)
+- 12 samples per snapshot chunk when `VSCOPE_NUM_CHANNELS = 5`
+- 14 variable labels per GET_VAR_LIST page
 
 ## Response format
 
-All responses use the **same TYPE** as the request. Payload begins with:
+All successful responses use the **same TYPE** as the request and include only the response data (no status byte).
 
-- `status` byte:
-  - `0x00` = success
-  - `0x01+` = error code (no additional data)
+Errors are returned as a dedicated error frame:
+
+- **TYPE**: `0xFF`
+- **Payload**: `u8 error_code`
 
 ## Message Types
 
@@ -36,7 +39,6 @@ All responses use the **same TYPE** as the request. Payload begins with:
 - `u8` protocol_version
 - `u8` channel_count
 - `u16` buffer_size
-- `u16` max_payload
 - `u8` var_count
 - `u8` rt_count
 - `u8` rt_buffer_len
@@ -49,7 +51,7 @@ All responses use the **same TYPE** as the request. Payload begins with:
 
 ### `0x03` SET_TIMING
 **Request payload:** `u32 divider`, `u32 pre_trig`  
-**Response:** status
+**Response data:** `u32 divider`, `u32 pre_trig`
 
 ### `0x04` GET_STATE
 **Request:** empty payload  
@@ -57,7 +59,7 @@ All responses use the **same TYPE** as the request. Payload begins with:
 
 ### `0x05` SET_STATE
 **Request payload:** `u8 state`  
-**Response:** status
+**Response data:** `u8 state`
 
 Valid states:
 - `0` HALTED
@@ -67,7 +69,7 @@ Valid states:
 
 ### `0x06` TRIGGER
 **Request:** empty payload  
-**Response:** status
+**Response:** empty payload
 
 ### `0x07` GET_FRAME
 **Request:** empty payload  
@@ -85,7 +87,7 @@ Valid states:
 - `u8` trigger_mode
 - `float[rt_count]` rt_values (count from `GET_INFO`)
 
-If no valid snapshot is available, response status is `NOT_READY`.
+If no valid snapshot is available, respond with error code `NOT_READY`.
 
 ### `0x09` GET_SNAPSHOT_DATA
 **Request payload:** `u16 start_sample`, `u8 sample_count`  
@@ -94,9 +96,9 @@ If no valid snapshot is available, response status is `NOT_READY`.
 Notes:
 - `start_sample` is relative to the device's internal trigger index (`first_element`)
 - Host controls `sample_count` to adapt to noisy links
-- Max sample_count = `(VSCOPE_MAX_PAYLOAD - 1) / (VSCOPE_NUM_CHANNELS * 4)`
+- Max sample_count = `VSCOPE_MAX_PAYLOAD / (VSCOPE_NUM_CHANNELS * 4)`
 - `buffer_size` for total samples comes from `GET_INFO`
-- If no valid snapshot is available, response status is `NOT_READY`
+- If no valid snapshot is available, respond with error code `NOT_READY`
 
 ### `0x0A` GET_VAR_LIST
 **Request payload (optional):**
@@ -119,15 +121,26 @@ Notes:
 
 ### `0x0C` SET_CHANNEL_MAP
 **Request payload:** `u8[VSCOPE_NUM_CHANNELS]` var IDs  
-**Response:** status
+**Response data:** `u8[VSCOPE_NUM_CHANNELS]` var IDs
 
 ### `0x0D` GET_CHANNEL_LABELS
 **Request:** empty payload  
 **Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_NUM_CHANNELS`
 
 ### `0x0E` GET_RT_LABELS
-**Request:** empty payload  
-**Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_RT_BUFFER_LEN`
+**Request payload (optional):**
+
+- `u8 start_idx` (default 0)
+- `u8 max_count` (default all)
+
+**Response data:**
+
+- `u8 total_count`
+- `u8 start_idx`
+- `u8 count`
+- Repeated `count` times:
+  - `u8 id`
+  - `char[VSCOPE_NAME_LEN]` name
 
 ### `0x0F` GET_RT_BUFFER
 **Request payload:** `u8 index`  
@@ -135,7 +148,7 @@ Notes:
 
 ### `0x10` SET_RT_BUFFER
 **Request payload:** `u8 index`, `float value`  
-**Response:** status
+**Response data:** `float value`
 
 ### `0x11` GET_TRIGGER
 **Request:** empty payload  
@@ -149,9 +162,15 @@ Trigger modes:
 
 ### `0x12` SET_TRIGGER
 **Request payload:** `float threshold`, `u8 channel`, `u8 mode`  
-**Response:** status
+**Response data:** `float threshold`, `u8 channel`, `u8 mode`
+
+### `0xFF` ERROR
+**Request:** none (response only)  
+**Response data:** `u8 error_code`
 
 ## Error codes
+
+Returned as payload of `0xFF` ERROR frames.
 
 - `0x01` BAD_LEN
 - `0x02` BAD_PARAM

@@ -11,7 +11,7 @@
 - Byte stream framing, minimal overhead
 - Proposed frame: `SYNC | LEN | TYPE | PAYLOAD... | CRC`
   - `SYNC`: constant (e.g., 0xC8) to find frame start
-  - `LEN`: payload length + type (define exact semantics)
+  - `LEN`: bytes after LEN (TYPE + PAYLOAD + CRC), u8 range 2-255
   - `TYPE`: message id
   - `PAYLOAD`: variable length
   - `CRC`: CRC8 or CRC16 over `TYPE+PAYLOAD` (confirm)
@@ -36,7 +36,7 @@
 
 ## Message families (draft)
 - Discovery/handshake
-  - `GET_INFO`: version, channel count, buffer size, max payload, var count, rt count/len, name len, device name
+  - `GET_INFO`: version, channel count, buffer size, var count, rt count/len, name len, device name
 - Timing/control
   - `GET_TIMING`, `SET_TIMING`, `GET_STATE`, `SET_STATE`, `TRIGGER`
 - Live data
@@ -78,7 +78,7 @@
 
 ## Open questions
 - CRC choice: CRC8 (fast) vs CRC16 (safer) vs CRSF CRC8 poly?
-- Max payload size? (impacts snapshot chunking)
+- Fixed payload size? (impacts snapshot chunking)
 - Snapshot transfer: single frame vs chunked stream with seq + resume?
 - Are channel labels fixed length or null-terminated?
 - Do we need per-message ACKs or only for control messages?

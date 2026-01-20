@@ -6,10 +6,12 @@ use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const VSCOPE_SYNC_BYTE: u8 = 0xC8;
-const MAX_FRAME_LEN: usize = 4096;
+const MAX_FRAME_LEN: usize = 254;
+const MAX_PAYLOAD_LEN: usize = 252;
+const FRAME_READ_TIMEOUT_MS: u64 = 100;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,14 +228,14 @@ fn parse_stop_bits(value: &str) -> Result<StopBits, String> {
 
 fn build_frame(payload: &[u8]) -> Result<Vec<u8>, String> {
     let payload_len = payload.len();
-    if payload_len + 1 > u16::MAX as usize {
+    if payload_len > MAX_PAYLOAD_LEN {
         return Err("payload too large".to_string());
     }
 
-    let len_field = (payload_len + 1) as u16;
-    let mut frame = Vec::with_capacity(1 + 2 + payload_len + 1);
+    let len_field = (payload_len + 1) as u8;
+    let mut frame = Vec::with_capacity(1 + 1 + payload_len + 1);
     frame.push(VSCOPE_SYNC_BYTE);
-    frame.extend_from_slice(&len_field.to_le_bytes());
+    frame.push(len_field);
     frame.extend_from_slice(payload);
     let crc = crc8(payload);
     frame.push(crc);
@@ -241,16 +243,28 @@ fn build_frame(payload: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn read_frame(port: &mut dyn SerialPort) -> io::Result<Vec<u8>> {
+    let port_timeout = port.timeout();
+    let deadline = Instant::now()
+        + if port_timeout == Duration::from_millis(0) {
+            Duration::from_millis(FRAME_READ_TIMEOUT_MS)
+        } else {
+            port_timeout
+        };
+
     loop {
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(io::ErrorKind::TimedOut, "frame read timeout"));
+        }
+
         let mut sync = [0u8; 1];
         port.read_exact(&mut sync)?;
         if sync[0] != VSCOPE_SYNC_BYTE {
             continue;
         }
 
-        let mut len_bytes = [0u8; 2];
-        port.read_exact(&mut len_bytes)?;
-        let len = u16::from_le_bytes(len_bytes) as usize;
+        let mut len_byte = [0u8; 1];
+        port.read_exact(&mut len_byte)?;
+        let len = len_byte[0] as usize;
         if !(2..=MAX_FRAME_LEN).contains(&len) {
             continue;
         }
@@ -372,13 +386,12 @@ mod tests {
         let frame = build_frame(&payload).unwrap();
 
         assert_eq!(frame[0], VSCOPE_SYNC_BYTE);
-        // len field = payload_len + 1 (for crc) = 4, little-endian
+        // len field = payload_len + 1 (for crc) = 4
         assert_eq!(frame[1], 0x04);
-        assert_eq!(frame[2], 0x00);
         // payload
-        assert_eq!(&frame[3..6], &payload);
+        assert_eq!(&frame[2..5], &payload);
         // crc
-        assert_eq!(frame[6], crc8(&payload));
+        assert_eq!(frame[5], crc8(&payload));
     }
 
     #[test]
@@ -386,19 +399,25 @@ mod tests {
         let payload = vec![0x42]; // single byte (message type)
         let frame = build_frame(&payload).unwrap();
 
-        assert_eq!(frame.len(), 1 + 2 + 1 + 1); // sync + len(2) + payload + crc
+        assert_eq!(frame.len(), 1 + 1 + 1 + 1); // sync + len(1) + payload + crc
         assert_eq!(frame[0], VSCOPE_SYNC_BYTE);
-        assert_eq!(u16::from_le_bytes([frame[1], frame[2]]), 2); // payload + crc
+        assert_eq!(frame[1], 2); // payload + crc
     }
 
     #[test]
     fn build_frame_larger_payload() {
-        let payload = vec![0xAA; 256];
+        let payload = vec![0xAA; 252];
         let frame = build_frame(&payload).unwrap();
 
-        assert_eq!(frame.len(), 1 + 2 + 256 + 1);
-        let len_field = u16::from_le_bytes([frame[1], frame[2]]);
-        assert_eq!(len_field, 257); // 256 + 1 for crc
+        assert_eq!(frame.len(), 1 + 1 + 252 + 1);
+        let len_field = frame[1];
+        assert_eq!(len_field, 253); // 252 + 1 for crc
+    }
+
+    #[test]
+    fn build_frame_too_large() {
+        let payload = vec![0xAA; 253];
+        assert!(build_frame(&payload).is_err());
     }
 
     #[test]

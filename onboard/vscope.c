@@ -4,7 +4,6 @@
 #include <string.h>
 
 typedef enum {
-    VSCOPE_STATUS_OK = 0,
     VSCOPE_ERR_BAD_LEN = 1,
     VSCOPE_ERR_BAD_PARAM = 2,
     VSCOPE_ERR_BAD_STATE = 3,
@@ -31,13 +30,13 @@ typedef enum {
     VSCOPE_MSG_SET_RT_BUFFER = 0x10,
     VSCOPE_MSG_GET_TRIGGER = 0x11,
     VSCOPE_MSG_SET_TRIGGER = 0x12,
+    VSCOPE_MSG_ERROR = 0xFF,
 } VscopeMessageType;
 
 typedef enum {
     VS_RX_IDLE = 0,
-    VS_RX_LEN_LO = 1,
-    VS_RX_LEN_HI = 2,
-    VS_RX_DATA = 3,
+    VS_RX_LEN = 1,
+    VS_RX_DATA = 2,
 } VscopeRxState;
 
 typedef struct {
@@ -176,13 +175,12 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t pay
         return;
     }
 
-    uint8_t frame[VSCOPE_MAX_PAYLOAD + 5];
-    uint16_t len_field = (uint16_t)(payload_len + 2U);
+    uint8_t frame[VSCOPE_MAX_PAYLOAD + 4];
+    uint8_t len_field = (uint8_t)(payload_len + 2U);
     uint16_t offset = 0U;
 
     frame[offset++] = (uint8_t)VSCOPE_SYNC_BYTE;
-    frame[offset++] = (uint8_t)(len_field & 0xFF);
-    frame[offset++] = (uint8_t)((len_field >> 8) & 0xFF);
+    frame[offset++] = len_field;
     frame[offset++] = type;
 
     if (payload_len > 0U) {
@@ -190,29 +188,21 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t pay
         offset = (uint16_t)(offset + payload_len);
     }
 
-    frame[offset++] = vscope_crc8(&frame[3], (uint16_t)(payload_len + 1U));
+    frame[offset++] = vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U));
 
     vscopeTxBytes(frame, offset);
 }
 
-static void vscope_send_status(uint8_t type, uint8_t status) {
-    uint8_t payload[1];
-    payload[0] = status;
-    vscope_send_frame(type, payload, sizeof(payload));
+static void vscope_send_error(uint8_t error_code) {
+    vscope_send_frame(VSCOPE_MSG_ERROR, &error_code, 1U);
 }
 
-static void vscope_send_status_with_data(uint8_t type, const uint8_t* data, uint16_t data_len) {
-    if ((uint16_t)(data_len + 1U) > VSCOPE_MAX_PAYLOAD) {
-        vscope_send_status(type, VSCOPE_ERR_BAD_LEN);
+static void vscope_send_payload(uint8_t type, const uint8_t* data, uint16_t data_len) {
+    if (data_len > VSCOPE_MAX_PAYLOAD) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
-
-    uint8_t payload[VSCOPE_MAX_PAYLOAD];
-    payload[0] = VSCOPE_STATUS_OK;
-    if (data_len > 0U) {
-        memcpy(&payload[1], data, data_len);
-    }
-    vscope_send_frame(type, payload, (uint16_t)(data_len + 1U));
+    vscope_send_frame(type, data, data_len);
 }
 
 static uint8_t vscope_get_mapped_channel(uint8_t channel) {
@@ -238,14 +228,12 @@ static bool vscope_update_channel_map(const uint8_t* ids) {
 }
 
 static void vscope_handle_get_info(void) {
-    uint8_t data[10 + VSCOPE_DEVICE_NAME_LEN];
+    uint8_t data[8 + VSCOPE_DEVICE_NAME_LEN];
     uint16_t offset = 0U;
 
     data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
     data[offset++] = (uint8_t)vscope.n_ch;
     vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
-    offset = (uint16_t)(offset + 2U);
-    vscope_write_u16(&data[offset], (uint16_t)VSCOPE_MAX_PAYLOAD);
     offset = (uint16_t)(offset + 2U);
     data[offset++] = var_count;
     data[offset++] = rt_count;
@@ -253,19 +241,26 @@ static void vscope_handle_get_info(void) {
     data[offset++] = (uint8_t)VSCOPE_DEVICE_NAME_LEN;
     vscope_write_str_fixed(&data[offset], vscope.device_name, VSCOPE_DEVICE_NAME_LEN);
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_INFO, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_INFO, data, sizeof(data));
 }
 
 static void vscope_handle_get_timing(void) {
     uint8_t data[8];
     vscope_write_u32(&data[0], vscope.divider);
     vscope_write_u32(&data[4], vscope.pre_trig);
-    vscope_send_status_with_data(VSCOPE_MSG_GET_TIMING, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_TIMING, data, sizeof(data));
+}
+
+static void vscope_send_timing(uint8_t type) {
+    uint8_t data[8];
+    vscope_write_u32(&data[0], vscope.divider);
+    vscope_write_u32(&data[4], vscope.pre_trig);
+    vscope_send_payload(type, data, sizeof(data));
 }
 
 static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_len) {
     if (payload_len != 8U) {
-        vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_ERR_BAD_LEN);
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
@@ -273,41 +268,47 @@ static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_le
     uint32_t pre_trig = vscope_read_u32(&payload[4]);
 
     if (divider == 0U || pre_trig > vscope.buffer_size) {
-        vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
     vscope.divider = divider;
     vscope.pre_trig = pre_trig;
     vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
-    vscope_send_status(VSCOPE_MSG_SET_TIMING, VSCOPE_STATUS_OK);
+    vscope_send_timing(VSCOPE_MSG_SET_TIMING);
 }
 
 static void vscope_handle_get_state(void) {
     uint8_t data[1];
     data[0] = (uint8_t)vscope.state;
-    vscope_send_status_with_data(VSCOPE_MSG_GET_STATE, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_STATE, data, sizeof(data));
+}
+
+static void vscope_send_state(uint8_t type) {
+    uint8_t data[1];
+    data[0] = (uint8_t)vscope.state;
+    vscope_send_payload(type, data, sizeof(data));
 }
 
 static void vscope_handle_set_state(const uint8_t* payload, uint16_t payload_len) {
-    if (payload_len < 1U) {
-        vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_ERR_BAD_LEN);
+    if (payload_len != 1U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
     uint8_t requested = payload[0];
     if (requested > VSCOPE_ACQUIRING) {
-        vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
     vscope.request = (VscopeState)requested;
-    vscope_send_status(VSCOPE_MSG_SET_STATE, VSCOPE_STATUS_OK);
+    vscope_send_state(VSCOPE_MSG_SET_STATE);
 }
 
 static void vscope_handle_trigger(void) {
     vscopeTrigger();
-    vscope_send_status(VSCOPE_MSG_TRIGGER, VSCOPE_STATUS_OK);
+    vscope_send_payload(VSCOPE_MSG_TRIGGER, NULL, 0U);
 }
 
 static void vscope_handle_get_frame(void) {
@@ -319,12 +320,12 @@ static void vscope_handle_get_frame(void) {
         offset = (uint16_t)(offset + 4U);
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_FRAME, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_FRAME, data, sizeof(data));
 }
 
 static void vscope_handle_get_snapshot_header(void) {
     if (!snapshot_valid) {
-        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_HEADER, VSCOPE_ERR_NOT_READY);
+        vscope_send_error(VSCOPE_ERR_NOT_READY);
         return;
     }
 
@@ -349,17 +350,17 @@ static void vscope_handle_get_snapshot_header(void) {
         offset = (uint16_t)(offset + 4U);
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_HEADER, data, offset);
+    vscope_send_payload(VSCOPE_MSG_GET_SNAPSHOT_HEADER, data, offset);
 }
 
 static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t payload_len) {
     if (!snapshot_valid) {
-        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_NOT_READY);
+        vscope_send_error(VSCOPE_ERR_NOT_READY);
         return;
     }
 
-    if (payload_len < 3U) {
-        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_LEN);
+    if (payload_len != 3U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
@@ -367,13 +368,19 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
     uint8_t requested_count = payload[2];
 
     if (start_sample >= vscope.buffer_size || requested_count == 0U || requested_count > vscope.buffer_size) {
-        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    uint16_t max_samples = (uint16_t)((VSCOPE_MAX_PAYLOAD - 1U) / (VSCOPE_NUM_CHANNELS * 4U));
+    uint32_t end_sample = (uint32_t)start_sample + (uint32_t)requested_count;
+    if (end_sample > vscope.buffer_size) {
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    uint16_t max_samples = (uint16_t)(VSCOPE_MAX_PAYLOAD / (VSCOPE_NUM_CHANNELS * 4U));
     if (requested_count > max_samples) {
-        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_LEN);
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
@@ -388,12 +395,17 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
         }
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_DATA, data, offset);
+    vscope_send_payload(VSCOPE_MSG_GET_SNAPSHOT_DATA, data, offset);
 }
 
 static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_len) {
     uint8_t start_idx = 0U;
     uint8_t requested_count = 0xFFU;
+
+    if (payload_len > 2U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
+        return;
+    }
 
     if (payload_len >= 1U) {
         start_idx = payload[0];
@@ -403,12 +415,12 @@ static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_
     }
 
     if (start_idx >= var_count) {
-        vscope_send_status(VSCOPE_MSG_GET_VAR_LIST, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
     uint16_t entry_size = (uint16_t)(1U + VSCOPE_NAME_LEN);
-    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 1U - 3U) / entry_size);
+    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
     uint16_t available = (uint16_t)(var_count - start_idx);
     uint16_t desired = (requested_count == 0xFFU) ? available : requested_count;
     uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
@@ -426,7 +438,7 @@ static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_VAR_LIST, data, offset);
+    vscope_send_payload(VSCOPE_MSG_GET_VAR_LIST, data, offset);
 }
 
 static void vscope_handle_get_channel_map(void) {
@@ -434,21 +446,29 @@ static void vscope_handle_get_channel_map(void) {
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
         data[i] = channel_map[i];
     }
-    vscope_send_status_with_data(VSCOPE_MSG_GET_CHANNEL_MAP, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_MAP, data, sizeof(data));
+}
+
+static void vscope_send_channel_map(uint8_t type) {
+    uint8_t data[VSCOPE_NUM_CHANNELS];
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        data[i] = channel_map[i];
+    }
+    vscope_send_payload(type, data, sizeof(data));
 }
 
 static void vscope_handle_set_channel_map(const uint8_t* payload, uint16_t payload_len) {
     if (payload_len != VSCOPE_NUM_CHANNELS) {
-        vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_ERR_BAD_LEN);
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
     if (!vscope_update_channel_map(payload)) {
-        vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    vscope_send_status(VSCOPE_MSG_SET_CHANNEL_MAP, VSCOPE_STATUS_OK);
+    vscope_send_channel_map(VSCOPE_MSG_SET_CHANNEL_MAP);
 }
 
 static void vscope_handle_get_channel_labels(void) {
@@ -465,57 +485,90 @@ static void vscope_handle_get_channel_labels(void) {
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_CHANNEL_LABELS, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_LABELS, data, sizeof(data));
 }
 
-static void vscope_handle_get_rt_labels(void) {
-    uint8_t data[VSCOPE_RT_BUFFER_LEN * VSCOPE_NAME_LEN];
-    uint16_t offset = 0U;
+static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload_len) {
+    uint8_t start_idx = 0U;
+    uint8_t requested_count = 0xFFU;
 
-    for (uint8_t i = 0U; i < VSCOPE_RT_BUFFER_LEN; i += 1U) {
-        if (i < rt_count) {
-            vscope_write_str_fixed(&data[offset], rt_names[i], VSCOPE_NAME_LEN);
-        } else {
-            memset(&data[offset], 0, VSCOPE_NAME_LEN);
-        }
+    if (payload_len > 2U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    if (payload_len >= 1U) {
+        start_idx = payload[0];
+    }
+    if (payload_len >= 2U) {
+        requested_count = payload[1];
+    }
+
+    if (start_idx >= rt_count) {
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    uint16_t entry_size = (uint16_t)(1U + VSCOPE_NAME_LEN);
+    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
+    uint16_t available = (uint16_t)(rt_count - start_idx);
+    uint16_t desired = (requested_count == 0xFFU) ? available : requested_count;
+    uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
+
+    uint8_t data[VSCOPE_MAX_PAYLOAD];
+    uint16_t offset = 0U;
+    data[offset++] = rt_count;
+    data[offset++] = start_idx;
+    data[offset++] = (uint8_t)count;
+
+    for (uint16_t i = 0U; i < count; i += 1U) {
+        uint8_t id = (uint8_t)(start_idx + i);
+        data[offset++] = id;
+        vscope_write_str_fixed(&data[offset], rt_names[id], VSCOPE_NAME_LEN);
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_RT_LABELS, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_RT_LABELS, data, offset);
 }
 
 static void vscope_handle_get_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
-    if (payload_len < 1U) {
-        vscope_send_status(VSCOPE_MSG_GET_RT_BUFFER, VSCOPE_ERR_BAD_LEN);
+    if (payload_len != 1U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
     uint8_t idx = payload[0];
     if (idx >= rt_count) {
-        vscope_send_status(VSCOPE_MSG_GET_RT_BUFFER, VSCOPE_ERR_RANGE);
+        vscope_send_error(VSCOPE_ERR_RANGE);
         return;
     }
 
     uint8_t data[4];
     vscope_write_f32(data, *(rt_values[idx]));
-    vscope_send_status_with_data(VSCOPE_MSG_GET_RT_BUFFER, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_RT_BUFFER, data, sizeof(data));
+}
+
+static void vscope_send_rt_buffer_value(uint8_t type, uint8_t idx) {
+    uint8_t data[4];
+    vscope_write_f32(data, *(rt_values[idx]));
+    vscope_send_payload(type, data, sizeof(data));
 }
 
 static void vscope_handle_set_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
     if (payload_len != 5U) {
-        vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_ERR_BAD_LEN);
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
     uint8_t idx = payload[0];
     if (idx >= rt_count) {
-        vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_ERR_RANGE);
+        vscope_send_error(VSCOPE_ERR_RANGE);
         return;
     }
 
     float value = vscope_read_f32(&payload[1]);
     *(rt_values[idx]) = value;
-    vscope_send_status(VSCOPE_MSG_SET_RT_BUFFER, VSCOPE_STATUS_OK);
+    vscope_send_rt_buffer_value(VSCOPE_MSG_SET_RT_BUFFER, idx);
 }
 
 static void vscope_handle_get_trigger(void) {
@@ -523,12 +576,20 @@ static void vscope_handle_get_trigger(void) {
     vscope_write_f32(&data[0], vscope.trigger_threshold);
     data[4] = vscope.trigger_channel;
     data[5] = (uint8_t)vscope.trigger_mode;
-    vscope_send_status_with_data(VSCOPE_MSG_GET_TRIGGER, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_TRIGGER, data, sizeof(data));
+}
+
+static void vscope_send_trigger(uint8_t type) {
+    uint8_t data[6];
+    vscope_write_f32(&data[0], vscope.trigger_threshold);
+    data[4] = vscope.trigger_channel;
+    data[5] = (uint8_t)vscope.trigger_mode;
+    vscope_send_payload(type, data, sizeof(data));
 }
 
 static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_len) {
     if (payload_len != 6U) {
-        vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_ERR_BAD_LEN);
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
@@ -537,41 +598,65 @@ static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_l
     uint8_t mode = payload[5];
 
     if (channel >= VSCOPE_NUM_CHANNELS || mode > (uint8_t)VSCOPE_TRG_BOTH) {
-        vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_ERR_BAD_PARAM);
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
     vscope.trigger_threshold = threshold;
     vscope.trigger_channel = channel;
     vscope.trigger_mode = (VscopeTriggerMode)mode;
-    vscope_send_status(VSCOPE_MSG_SET_TRIGGER, VSCOPE_STATUS_OK);
+    vscope_send_trigger(VSCOPE_MSG_SET_TRIGGER);
 }
 
 static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t payload_len) {
     switch (type) {
         case VSCOPE_MSG_GET_INFO:
-            vscope_handle_get_info();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_info();
+            }
             break;
         case VSCOPE_MSG_GET_TIMING:
-            vscope_handle_get_timing();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_timing();
+            }
             break;
         case VSCOPE_MSG_SET_TIMING:
             vscope_handle_set_timing(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_STATE:
-            vscope_handle_get_state();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_state();
+            }
             break;
         case VSCOPE_MSG_SET_STATE:
             vscope_handle_set_state(payload, payload_len);
             break;
         case VSCOPE_MSG_TRIGGER:
-            vscope_handle_trigger();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_trigger();
+            }
             break;
         case VSCOPE_MSG_GET_FRAME:
-            vscope_handle_get_frame();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_frame();
+            }
             break;
         case VSCOPE_MSG_GET_SNAPSHOT_HEADER:
-            vscope_handle_get_snapshot_header();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_snapshot_header();
+            }
             break;
         case VSCOPE_MSG_GET_SNAPSHOT_DATA:
             vscope_handle_get_snapshot_data(payload, payload_len);
@@ -580,16 +665,24 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
             vscope_handle_get_var_list(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_CHANNEL_MAP:
-            vscope_handle_get_channel_map();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_channel_map();
+            }
             break;
         case VSCOPE_MSG_SET_CHANNEL_MAP:
             vscope_handle_set_channel_map(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_CHANNEL_LABELS:
-            vscope_handle_get_channel_labels();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_channel_labels();
+            }
             break;
         case VSCOPE_MSG_GET_RT_LABELS:
-            vscope_handle_get_rt_labels();
+            vscope_handle_get_rt_labels(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_RT_BUFFER:
             vscope_handle_get_rt_buffer(payload, payload_len);
@@ -598,13 +691,17 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
             vscope_handle_set_rt_buffer(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_TRIGGER:
-            vscope_handle_get_trigger();
+            if (payload_len != 0U) {
+                vscope_send_error(VSCOPE_ERR_BAD_LEN);
+            } else {
+                vscope_handle_get_trigger();
+            }
             break;
         case VSCOPE_MSG_SET_TRIGGER:
             vscope_handle_set_trigger(payload, payload_len);
             break;
         default:
-            vscope_send_status(type, VSCOPE_ERR_BAD_PARAM);
+            vscope_send_error(VSCOPE_ERR_BAD_PARAM);
             break;
     }
 }
@@ -650,17 +747,12 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
         switch (rx_state) {
             case VS_RX_IDLE:
                 if (byte == (uint8_t)VSCOPE_SYNC_BYTE) {
-                    rx_state = VS_RX_LEN_LO;
+                    rx_state = VS_RX_LEN;
                     rx_last_us = now_us;
                 }
                 break;
-            case VS_RX_LEN_LO:
+            case VS_RX_LEN:
                 rx_expected_len = byte;
-                rx_state = VS_RX_LEN_HI;
-                rx_last_us = now_us;
-                break;
-            case VS_RX_LEN_HI:
-                rx_expected_len |= (uint16_t)((uint16_t)byte << 8);
                 if (rx_expected_len < 2U || rx_expected_len > (uint16_t)(VSCOPE_MAX_PAYLOAD + 2U)) {
                     vscope_errors.len_invalid += 1U;
                     vscope_reset_rx(false);
@@ -774,7 +866,7 @@ static void vscope_check_trigger(void) {
 }
 
 void vscopeAcquire(void) {
-    static uint16_t divider_ticks = 0U;
+    static uint32_t divider_ticks = 0U;
     static uint16_t run_index = 0U;
 
     divider_ticks += 1U;

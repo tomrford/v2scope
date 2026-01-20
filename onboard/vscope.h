@@ -21,7 +21,8 @@
 #endif
 
 #ifndef VSCOPE_MAX_PAYLOAD
-#define VSCOPE_MAX_PAYLOAD 512
+// LEN is 1 byte and includes TYPE + CRC; cap total frame to 256 bytes.
+#define VSCOPE_MAX_PAYLOAD 252
 #endif
 
 #ifndef VSCOPE_DEVICE_NAME_LEN
