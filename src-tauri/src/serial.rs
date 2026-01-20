@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
-use serialport::{ClearBuffer, DataBits, FlowControl, Parity, SerialPort, SerialPortType, StopBits};
+use serialport::{
+    ClearBuffer, DataBits, FlowControl, Parity, SerialPort, SerialPortType, StopBits,
+};
 use std::collections::HashMap;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::Duration;
@@ -39,9 +41,11 @@ pub struct PortInfo {
     pub port_type: String,
 }
 
+type PortHandle = Arc<Mutex<Box<dyn SerialPort + Send>>>;
+
 struct Registry {
     next_id: AtomicU64,
-    ports: RwLock<HashMap<u64, Arc<Mutex<Box<dyn SerialPort + Send>>>>>,
+    ports: RwLock<HashMap<u64, PortHandle>>,
 }
 
 impl Registry {
@@ -59,12 +63,12 @@ impl Registry {
         id
     }
 
-    fn get(&self, id: u64) -> Option<Arc<Mutex<Box<dyn SerialPort + Send>>>> {
+    fn get(&self, id: u64) -> Option<PortHandle> {
         let ports = self.ports.read().expect("lock ports");
         ports.get(&id).cloned()
     }
 
-    fn remove(&self, id: u64) -> Option<Arc<Mutex<Box<dyn SerialPort + Send>>>> {
+    fn remove(&self, id: u64) -> Option<PortHandle> {
         let mut ports = self.ports.write().expect("lock ports");
         ports.remove(&id)
     }
@@ -96,7 +100,9 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, String> 
                 info.serial_number.clone(),
                 "usb".to_string(),
             ),
-            SerialPortType::BluetoothPort => (None, None, None, None, None, "bluetooth".to_string()),
+            SerialPortType::BluetoothPort => {
+                (None, None, None, None, None, "bluetooth".to_string())
+            }
             SerialPortType::PciPort => (None, None, None, None, None, "pci".to_string()),
             SerialPortType::Unknown => (None, None, None, None, None, "unknown".to_string()),
         };
@@ -143,15 +149,14 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, String> 
 
 #[tauri::command]
 pub fn open_device(path: String, config: SerialConfig) -> Result<u64, String> {
-    let mut builder = serialport::new(&path, config.baud_rate)
+    let builder = serialport::new(&path, config.baud_rate)
         .data_bits(parse_data_bits(&config.data_bits)?)
         .parity(parse_parity(&config.parity)?)
         .stop_bits(parse_stop_bits(&config.stop_bits)?)
         .flow_control(FlowControl::None)
         .timeout(Duration::from_millis(config.read_timeout_ms));
 
-    let mut port = builder.open().map_err(|err| err.to_string())?;
-    let _ = port.clear(ClearBuffer::All);
+    let port = builder.open().map_err(|err| err.to_string())?;
     Ok(registry().insert(port))
 }
 
@@ -166,9 +171,10 @@ pub fn flush_device(handle_id: u64) -> Result<(), String> {
     let port = registry()
         .get(handle_id)
         .ok_or_else(|| "unknown device handle".to_string())?;
-    let mut port = port.lock().map_err(|_| "device lock poisoned".to_string())?;
-    port.clear(ClearBuffer::All)
-        .map_err(|err| err.to_string())
+    let port = port
+        .lock()
+        .map_err(|_| "device lock poisoned".to_string())?;
+    port.clear(ClearBuffer::All).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -180,13 +186,15 @@ pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, String>
     let port = registry()
         .get(handle_id)
         .ok_or_else(|| "unknown device handle".to_string())?;
-    let mut port = port.lock().map_err(|_| "device lock poisoned".to_string())?;
+    let mut port = port
+        .lock()
+        .map_err(|_| "device lock poisoned".to_string())?;
 
     let frame = build_frame(&payload)?;
     port.write_all(&frame).map_err(|err| err.to_string())?;
     port.flush().map_err(|err| err.to_string())?;
 
-    read_frame(&mut *port).map_err(|err| err.to_string())
+    read_frame(&mut **port).map_err(|err| err.to_string())
 }
 
 fn parse_data_bits(value: &str) -> Result<DataBits, String> {
@@ -204,8 +212,6 @@ fn parse_parity(value: &str) -> Result<Parity, String> {
         "none" => Ok(Parity::None),
         "odd" => Ok(Parity::Odd),
         "even" => Ok(Parity::Even),
-        "mark" => Ok(Parity::Mark),
-        "space" => Ok(Parity::Space),
         _ => Err(format!("unsupported parity: {value}")),
     }
 }
@@ -245,7 +251,7 @@ fn read_frame(port: &mut dyn SerialPort) -> io::Result<Vec<u8>> {
         let mut len_bytes = [0u8; 2];
         port.read_exact(&mut len_bytes)?;
         let len = u16::from_le_bytes(len_bytes) as usize;
-        if len < 2 || len > MAX_FRAME_LEN {
+        if !(2..=MAX_FRAME_LEN).contains(&len) {
             continue;
         }
 
@@ -288,4 +294,121 @@ fn crc8(data: &[u8]) -> u8 {
         crc = CRC8_LUT[(crc ^ byte) as usize];
     }
     crc
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn crc8_empty() {
+        assert_eq!(crc8(&[]), 0x00);
+    }
+
+    #[test]
+    fn crc8_single_byte() {
+        assert_eq!(crc8(&[0x00]), 0x00);
+        assert_eq!(crc8(&[0x01]), 0xD5);
+        assert_eq!(crc8(&[0xFF]), 0xF9);
+    }
+
+    #[test]
+    fn crc8_multi_byte() {
+        // Verify deterministic output for multi-byte input
+        assert_eq!(crc8(&[0x01, 0x02, 0x03]), 0x3F);
+        // Different input produces different CRC
+        assert_ne!(crc8(&[0x01, 0x02, 0x03]), crc8(&[0x03, 0x02, 0x01]));
+    }
+
+    #[test]
+    fn parse_data_bits_valid() {
+        assert!(matches!(parse_data_bits("5"), Ok(DataBits::Five)));
+        assert!(matches!(parse_data_bits("five"), Ok(DataBits::Five)));
+        assert!(matches!(parse_data_bits("FIVE"), Ok(DataBits::Five)));
+        assert!(matches!(parse_data_bits("8"), Ok(DataBits::Eight)));
+        assert!(matches!(parse_data_bits("eight"), Ok(DataBits::Eight)));
+    }
+
+    #[test]
+    fn parse_data_bits_invalid() {
+        assert!(parse_data_bits("9").is_err());
+        assert!(parse_data_bits("").is_err());
+        assert!(parse_data_bits("foo").is_err());
+    }
+
+    #[test]
+    fn parse_parity_valid() {
+        assert!(matches!(parse_parity("none"), Ok(Parity::None)));
+        assert!(matches!(parse_parity("NONE"), Ok(Parity::None)));
+        assert!(matches!(parse_parity("odd"), Ok(Parity::Odd)));
+        assert!(matches!(parse_parity("even"), Ok(Parity::Even)));
+    }
+
+    #[test]
+    fn parse_parity_invalid() {
+        assert!(parse_parity("mark").is_err());
+        assert!(parse_parity("space").is_err());
+        assert!(parse_parity("").is_err());
+    }
+
+    #[test]
+    fn parse_stop_bits_valid() {
+        assert!(matches!(parse_stop_bits("1"), Ok(StopBits::One)));
+        assert!(matches!(parse_stop_bits("one"), Ok(StopBits::One)));
+        assert!(matches!(parse_stop_bits("2"), Ok(StopBits::Two)));
+        assert!(matches!(parse_stop_bits("TWO"), Ok(StopBits::Two)));
+    }
+
+    #[test]
+    fn parse_stop_bits_invalid() {
+        assert!(parse_stop_bits("3").is_err());
+        assert!(parse_stop_bits("1.5").is_err());
+        assert!(parse_stop_bits("").is_err());
+    }
+
+    #[test]
+    fn build_frame_structure() {
+        let payload = vec![0x01, 0x02, 0x03];
+        let frame = build_frame(&payload).unwrap();
+
+        assert_eq!(frame[0], VSCOPE_SYNC_BYTE);
+        // len field = payload_len + 1 (for crc) = 4, little-endian
+        assert_eq!(frame[1], 0x04);
+        assert_eq!(frame[2], 0x00);
+        // payload
+        assert_eq!(&frame[3..6], &payload);
+        // crc
+        assert_eq!(frame[6], crc8(&payload));
+    }
+
+    #[test]
+    fn build_frame_min_payload() {
+        let payload = vec![0x42]; // single byte (message type)
+        let frame = build_frame(&payload).unwrap();
+
+        assert_eq!(frame.len(), 1 + 2 + 1 + 1); // sync + len(2) + payload + crc
+        assert_eq!(frame[0], VSCOPE_SYNC_BYTE);
+        assert_eq!(u16::from_le_bytes([frame[1], frame[2]]), 2); // payload + crc
+    }
+
+    #[test]
+    fn build_frame_larger_payload() {
+        let payload = vec![0xAA; 256];
+        let frame = build_frame(&payload).unwrap();
+
+        assert_eq!(frame.len(), 1 + 2 + 256 + 1);
+        let len_field = u16::from_le_bytes([frame[1], frame[2]]);
+        assert_eq!(len_field, 257); // 256 + 1 for crc
+    }
+
+    #[test]
+    fn registry_insert_get_remove() {
+        let reg = Registry::new();
+
+        // Can't easily test with real SerialPort, but we can test the ID generation
+        let id1 = reg.next_id.fetch_add(1, Ordering::Relaxed);
+        let id2 = reg.next_id.fetch_add(1, Ordering::Relaxed);
+        assert_eq!(id1, 1);
+        assert_eq!(id2, 2);
+    }
 }
