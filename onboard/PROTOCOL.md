@@ -30,6 +30,11 @@ Errors are returned as a dedicated error frame:
 - **TYPE**: `0xFF`
 - **Payload**: `u8 error_code`
 
+Notes:
+- Error frames are sent **only** for requests that pass framing + CRC checks.
+- If LEN/CRC is invalid, the device drops the frame and sends no response.
+- Hosts should treat timeouts/IO errors (including disconnects) as transport issues; `0xFF` indicates a logical/parameter error.
+
 ## Message Types
 
 ### `0x01` GET_INFO
