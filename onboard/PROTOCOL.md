@@ -32,7 +32,11 @@ All responses use the **same TYPE** as the request. Payload begins with:
 - `u8` protocol_version
 - `u8` channel_count
 - `u16` buffer_size
+- `u16` max_payload
 - `u8` var_count
+- `u8` rt_count
+- `u8` rt_buffer_len
+- `u8` name_len
 - `char[VSCOPE_DEVICE_NAME_LEN]` device_name (fixed length)
 
 ### `0x02` GET_TIMING
@@ -70,18 +74,25 @@ Valid states:
 **Response data:**
 
 - `u8[VSCOPE_NUM_CHANNELS]` channel_map (var IDs)
-- `u16` first_element (trigger/oldest sample index)
-- `u16` sample_count (buffer_size)
-- `u16` pre_trig
+- `u32` divider
+- `u32` pre_trig
+- `float` trigger_threshold
+- `u8` trigger_channel
+- `u8` trigger_mode
+- `float[rt_count]` rt_values (count from `GET_INFO`)
+
+If no valid snapshot is available, response status is `NOT_READY`.
 
 ### `0x09` GET_SNAPSHOT_DATA
 **Request payload:** `u16 start_sample`, `u8 sample_count`  
 **Response data:** `float[sample_count * VSCOPE_NUM_CHANNELS]`
 
 Notes:
-- `start_sample` is relative to `first_element`
+- `start_sample` is relative to the device's internal trigger index (`first_element`)
 - Host controls `sample_count` to adapt to noisy links
 - Max sample_count = `(VSCOPE_MAX_PAYLOAD - 1) / (VSCOPE_NUM_CHANNELS * 4)`
+- `buffer_size` for total samples comes from `GET_INFO`
+- If no valid snapshot is available, response status is `NOT_READY`
 
 ### `0x0A` GET_VAR_LIST
 **Request payload (optional):**

@@ -1,7 +1,6 @@
 #include "vscope.h"
 
 #include <stdbool.h>
-#include <stdio.h>
 #include <string.h>
 
 typedef enum {
@@ -46,6 +45,15 @@ typedef struct {
     float* ptr;
 } VscopeVar;
 
+typedef struct {
+    uint32_t divider;
+    uint32_t pre_trig;
+    uint8_t channel_map[VSCOPE_NUM_CHANNELS];
+    float trigger_threshold;
+    uint8_t trigger_channel;
+    uint8_t trigger_mode;
+} VscopeSnapshotMeta;
+
 VscopeStruct vscope;
 
 static VscopeErrors vscope_errors;
@@ -59,6 +67,10 @@ static float *rt_values[VSCOPE_RT_BUFFER_LEN];
 static char rt_names[VSCOPE_RT_BUFFER_LEN][VSCOPE_NAME_LEN];
 static uint8_t rt_count;
 static float vscope_zero_value = 0.0f;
+static VscopeSnapshotMeta snapshot_meta;
+static float snapshot_rt_values[VSCOPE_RT_BUFFER_LEN];
+static uint8_t snapshot_rt_count;
+static bool snapshot_valid;
 
 static VscopeRxState rx_state;
 static uint16_t rx_expected_len;
@@ -132,6 +144,22 @@ static void vscope_write_str_fixed(uint8_t* dest, const char* src, size_t len) {
 
 static uint16_t vscope_min_u16(uint16_t a, uint16_t b) {
     return (a < b) ? a : b;
+}
+
+static void vscope_capture_snapshot_meta(void) {
+    snapshot_meta.divider = vscope.divider;
+    snapshot_meta.pre_trig = vscope.pre_trig;
+    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+        snapshot_meta.channel_map[i] = channel_map[i];
+    }
+    snapshot_meta.trigger_threshold = vscope.trigger_threshold;
+    snapshot_meta.trigger_channel = vscope.trigger_channel;
+    snapshot_meta.trigger_mode = (uint8_t)vscope.trigger_mode;
+
+    snapshot_rt_count = rt_count;
+    for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
+        snapshot_rt_values[i] = *(rt_values[i]);
+    }
 }
 
 static void vscope_reset_rx(bool count_timeout) {
@@ -210,14 +238,19 @@ static bool vscope_update_channel_map(const uint8_t* ids) {
 }
 
 static void vscope_handle_get_info(void) {
-    uint8_t data[1 + 1 + 2 + 1 + VSCOPE_DEVICE_NAME_LEN];
+    uint8_t data[10 + VSCOPE_DEVICE_NAME_LEN];
     uint16_t offset = 0U;
 
     data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
     data[offset++] = (uint8_t)vscope.n_ch;
     vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
     offset = (uint16_t)(offset + 2U);
+    vscope_write_u16(&data[offset], (uint16_t)VSCOPE_MAX_PAYLOAD);
+    offset = (uint16_t)(offset + 2U);
     data[offset++] = var_count;
+    data[offset++] = rt_count;
+    data[offset++] = (uint8_t)VSCOPE_RT_BUFFER_LEN;
+    data[offset++] = (uint8_t)VSCOPE_DEVICE_NAME_LEN;
     vscope_write_str_fixed(&data[offset], vscope.device_name, VSCOPE_DEVICE_NAME_LEN);
 
     vscope_send_status_with_data(VSCOPE_MSG_GET_INFO, data, sizeof(data));
@@ -290,23 +323,41 @@ static void vscope_handle_get_frame(void) {
 }
 
 static void vscope_handle_get_snapshot_header(void) {
-    uint8_t data[VSCOPE_NUM_CHANNELS + 6];
+    if (!snapshot_valid) {
+        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_HEADER, VSCOPE_ERR_NOT_READY);
+        return;
+    }
+
+    uint8_t data[VSCOPE_MAX_PAYLOAD];
     uint16_t offset = 0U;
 
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        data[offset++] = channel_map[i];
+        data[offset++] = snapshot_meta.channel_map[i];
     }
 
-    vscope_write_u16(&data[offset], (uint16_t)vscope.first_element);
-    offset = (uint16_t)(offset + 2U);
-    vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
-    offset = (uint16_t)(offset + 2U);
-    vscope_write_u16(&data[offset], (uint16_t)vscope.pre_trig);
+    vscope_write_u32(&data[offset], snapshot_meta.divider);
+    offset = (uint16_t)(offset + 4U);
+    vscope_write_u32(&data[offset], snapshot_meta.pre_trig);
+    offset = (uint16_t)(offset + 4U);
+    vscope_write_f32(&data[offset], snapshot_meta.trigger_threshold);
+    offset = (uint16_t)(offset + 4U);
+    data[offset++] = snapshot_meta.trigger_channel;
+    data[offset++] = snapshot_meta.trigger_mode;
 
-    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_HEADER, data, sizeof(data));
+    for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
+        vscope_write_f32(&data[offset], snapshot_rt_values[i]);
+        offset = (uint16_t)(offset + 4U);
+    }
+
+    vscope_send_status_with_data(VSCOPE_MSG_GET_SNAPSHOT_HEADER, data, offset);
 }
 
 static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t payload_len) {
+    if (!snapshot_valid) {
+        vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_NOT_READY);
+        return;
+    }
+
     if (payload_len < 3U) {
         vscope_send_status(VSCOPE_MSG_GET_SNAPSHOT_DATA, VSCOPE_ERR_BAD_LEN);
         return;
@@ -643,9 +694,11 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
     }
 }
 
-void vscopeInit(void) {
+void vscopeInit(const char* device_name) {
     memset(&vscope, 0, sizeof(vscope));
     memset(&vscope_errors, 0, sizeof(vscope_errors));
+    snapshot_valid = false;
+    snapshot_rt_count = 0U;
 
     vscope.state = VSCOPE_HALTED;
     vscope.request = VSCOPE_HALTED;
@@ -658,8 +711,7 @@ void vscopeInit(void) {
     vscope.index = 0U;
     vscope.first_element = 0U;
 
-    memset(vscope.device_name, 0, VSCOPE_DEVICE_NAME_LEN);
-    snprintf(vscope.device_name, VSCOPE_DEVICE_NAME_LEN, "VScope");
+    vscope_write_str_fixed((uint8_t*)vscope.device_name, device_name, VSCOPE_DEVICE_NAME_LEN);
 
     registration_locked = true;
     if (var_count < VSCOPE_NUM_CHANNELS) {
@@ -738,6 +790,7 @@ void vscopeAcquire(void) {
             vscope.index = 0U;
             if (vscope.request == VSCOPE_RUNNING) {
                 vscope.state = VSCOPE_RUNNING;
+                snapshot_valid = false;
             }
             break;
         case VSCOPE_RUNNING:
@@ -745,9 +798,11 @@ void vscopeAcquire(void) {
                 vscope.state = VSCOPE_HALTED;
             }
             if (vscope.request == VSCOPE_ACQUIRING) {
+                vscope_capture_snapshot_meta();
                 if (vscope.acq_time == 0U) {
                     vscope.state = VSCOPE_HALTED;
                     vscope.first_element = vscope.index;
+                    snapshot_valid = true;
                 } else {
                     vscope.state = VSCOPE_ACQUIRING;
                     run_index = 1U;
@@ -759,6 +814,7 @@ void vscopeAcquire(void) {
             if (run_index == vscope.acq_time) {
                 vscope.state = VSCOPE_HALTED;
                 vscope.first_element = vscope.index;
+                snapshot_valid = true;
             } else {
                 run_index += 1U;
                 vscope_save_frame();

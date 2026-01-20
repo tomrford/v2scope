@@ -25,7 +25,7 @@
 #endif
 
 #ifndef VSCOPE_DEVICE_NAME_LEN
-#define VSCOPE_DEVICE_NAME_LEN 10
+#define VSCOPE_DEVICE_NAME_LEN VSCOPE_NAME_LEN
 #endif
 
 #ifndef VSCOPE_FRAME_TIMEOUT_US
@@ -99,7 +99,7 @@ void vscopeRegisterRtBuffer(const char* name, float* ptr);
 // Feed raw serial bytes into the parser.
 void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us);
 
-void vscopeInit(void);
+void vscopeInit(const char* device_name);
 void vscopeAcquire(void);
 void vscopeTrigger(void);
 

@@ -36,7 +36,7 @@
 
 ## Message families (draft)
 - Discovery/handshake
-  - `GET_INFO`: version, device id, channel count, buffer length, label lengths
+  - `GET_INFO`: version, channel count, buffer size, max payload, var count, rt count/len, name len, device name
 - Timing/control
   - `GET_TIMING`, `SET_TIMING`, `GET_STATE`, `SET_STATE`, `TRIGGER`
 - Live data
@@ -61,7 +61,7 @@
   - `GET_VAR_LIST (page_idx)` -> `count + [id,name]*N`
   - `GET_CHANNEL_MAP` -> current mapping
   - `SET_CHANNEL_MAP` -> new mapping (5 ids)
-- Snapshot header should include channel map + trigger info
+- Snapshot header should include channel map + timing + trigger info + RT buffer values
 
 ## Noise/robustness specifics
 - Make all control requests idempotent where possible
