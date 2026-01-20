@@ -1,0 +1,23 @@
+{
+  "svelte.enable-ts-plugin": true,
+  "rust-analyzer.linkedProjects": [
+    "src-tauri/Cargo.toml"
+  ],
+  "rust-analyzer.procMacro.enable": false,
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/build/**": true,
+    "**/target/**": true,
+    "**/result/**": true,
+    "**/.direnv/**": true,
+    "**/.svelte-kit/**": true
+  },
+  "files.exclude": {
+    "**/node_modules/**": true,
+    "**/target/**": true,
+    "**/result/**": true,
+    "**/.direnv/**": true,
+    "**/.svelte-kit/**": true
+  }
+}

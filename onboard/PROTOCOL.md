@@ -122,6 +122,20 @@ Notes:
 **Request payload:** `u8 index`, `float value`  
 **Response:** status
 
+### `0x11` GET_TRIGGER
+**Request:** empty payload  
+**Response data:** `float threshold`, `u8 channel`, `u8 mode`
+
+Trigger modes:
+- `0` DISABLED
+- `1` RISING
+- `2` FALLING
+- `3` BOTH
+
+### `0x12` SET_TRIGGER
+**Request payload:** `float threshold`, `u8 channel`, `u8 mode`  
+**Response:** status
+
 ## Error codes
 
 - `0x01` BAD_LEN
