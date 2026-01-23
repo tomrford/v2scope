@@ -1,9 +1,10 @@
+use crate::error::SerialError;
 use serde::{Deserialize, Serialize};
 use serialport::{
     ClearBuffer, DataBits, FlowControl, Parity, SerialPort, SerialPortType, StopBits,
 };
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
@@ -11,7 +12,6 @@ use std::time::{Duration, Instant};
 const VSCOPE_SYNC_BYTE: u8 = 0xC8;
 const MAX_FRAME_LEN: usize = 254;
 const MAX_PAYLOAD_LEN: usize = 252;
-const FRAME_READ_TIMEOUT_MS: u64 = 100;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,8 +82,8 @@ fn registry() -> &'static Registry {
 }
 
 #[tauri::command]
-pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, String> {
-    let ports = serialport::available_ports().map_err(|err| err.to_string())?;
+pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, SerialError> {
+    let ports = serialport::available_ports()?;
     let name_filter = filters
         .as_ref()
         .and_then(|filter| filter.name_substr.as_ref())
@@ -150,7 +150,7 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, String> 
 }
 
 #[tauri::command]
-pub fn open_device(path: String, config: SerialConfig) -> Result<u64, String> {
+pub fn open_device(path: String, config: SerialConfig) -> Result<u64, SerialError> {
     let builder = serialport::new(&path, config.baud_rate)
         .data_bits(parse_data_bits(&config.data_bits)?)
         .parity(parse_parity(&config.parity)?)
@@ -158,78 +158,93 @@ pub fn open_device(path: String, config: SerialConfig) -> Result<u64, String> {
         .flow_control(FlowControl::None)
         .timeout(Duration::from_millis(config.read_timeout_ms));
 
-    let port = builder.open().map_err(|err| err.to_string())?;
+    let port = builder.open().map_err(|err| match err.kind {
+        serialport::ErrorKind::NoDevice => SerialError::PortNotFound { path: path.clone() },
+        serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
+            SerialError::PortBusy { path: path.clone() }
+        }
+        _ => SerialError::from(err),
+    })?;
     Ok(registry().insert(port))
 }
 
 #[tauri::command]
-pub fn close_device(handle_id: u64) -> Result<(), String> {
+pub fn close_device(handle_id: u64) -> Result<(), SerialError> {
     let _ = registry().remove(handle_id);
     Ok(())
 }
 
 #[tauri::command]
-pub fn flush_device(handle_id: u64) -> Result<(), String> {
+pub fn flush_device(handle_id: u64) -> Result<(), SerialError> {
     let port = registry()
         .get(handle_id)
-        .ok_or_else(|| "unknown device handle".to_string())?;
-    let port = port
-        .lock()
-        .map_err(|_| "device lock poisoned".to_string())?;
-    port.clear(ClearBuffer::All).map_err(|err| err.to_string())
+        .ok_or(SerialError::InvalidHandle { handle_id })?;
+    let port = port.lock().map_err(|_| SerialError::IoError {
+        message: "device lock poisoned".to_string(),
+    })?;
+    port.clear(ClearBuffer::All)?;
+    Ok(())
 }
 
 #[tauri::command]
-pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, String> {
+pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, SerialError> {
     if payload.is_empty() {
-        return Err("payload must include message type".to_string());
+        return Err(SerialError::InvalidConfig {
+            message: "payload must include message type".to_string(),
+        });
     }
 
     let port = registry()
         .get(handle_id)
-        .ok_or_else(|| "unknown device handle".to_string())?;
-    let mut port = port
-        .lock()
-        .map_err(|_| "device lock poisoned".to_string())?;
+        .ok_or(SerialError::InvalidHandle { handle_id })?;
+    let mut port = port.lock().map_err(|_| SerialError::IoError {
+        message: "device lock poisoned".to_string(),
+    })?;
 
     let frame = build_frame(&payload)?;
-    port.write_all(&frame).map_err(|err| err.to_string())?;
-    port.flush().map_err(|err| err.to_string())?;
+    port.write_all(&frame)?;
+    port.flush()?;
 
-    read_frame(&mut **port).map_err(|err| err.to_string())
+    read_frame(&mut **port)
 }
 
-fn parse_data_bits(value: &str) -> Result<DataBits, String> {
+fn parse_data_bits(value: &str) -> Result<DataBits, SerialError> {
     match value.to_lowercase().as_str() {
         "5" | "five" => Ok(DataBits::Five),
         "6" | "six" => Ok(DataBits::Six),
         "7" | "seven" => Ok(DataBits::Seven),
         "8" | "eight" => Ok(DataBits::Eight),
-        _ => Err(format!("unsupported data_bits: {value}")),
+        _ => Err(SerialError::InvalidConfig {
+            message: format!("unsupported data_bits: {value}"),
+        }),
     }
 }
 
-fn parse_parity(value: &str) -> Result<Parity, String> {
+fn parse_parity(value: &str) -> Result<Parity, SerialError> {
     match value.to_lowercase().as_str() {
         "none" => Ok(Parity::None),
         "odd" => Ok(Parity::Odd),
         "even" => Ok(Parity::Even),
-        _ => Err(format!("unsupported parity: {value}")),
+        _ => Err(SerialError::InvalidConfig {
+            message: format!("unsupported parity: {value}"),
+        }),
     }
 }
 
-fn parse_stop_bits(value: &str) -> Result<StopBits, String> {
+fn parse_stop_bits(value: &str) -> Result<StopBits, SerialError> {
     match value.to_lowercase().as_str() {
         "1" | "one" => Ok(StopBits::One),
         "2" | "two" => Ok(StopBits::Two),
-        _ => Err(format!("unsupported stop_bits: {value}")),
+        _ => Err(SerialError::InvalidConfig {
+            message: format!("unsupported stop_bits: {value}"),
+        }),
     }
 }
 
-fn build_frame(payload: &[u8]) -> Result<Vec<u8>, String> {
+fn build_frame(payload: &[u8]) -> Result<Vec<u8>, SerialError> {
     let payload_len = payload.len();
     if payload_len > MAX_PAYLOAD_LEN {
-        return Err("payload too large".to_string());
+        return Err(SerialError::PayloadTooLarge);
     }
 
     let len_field = (payload_len + 1) as u8;
@@ -242,18 +257,12 @@ fn build_frame(payload: &[u8]) -> Result<Vec<u8>, String> {
     Ok(frame)
 }
 
-fn read_frame(port: &mut dyn SerialPort) -> io::Result<Vec<u8>> {
-    let port_timeout = port.timeout();
-    let deadline = Instant::now()
-        + if port_timeout == Duration::from_millis(0) {
-            Duration::from_millis(FRAME_READ_TIMEOUT_MS)
-        } else {
-            port_timeout
-        };
+fn read_frame(port: &mut dyn SerialPort) -> Result<Vec<u8>, SerialError> {
+    let deadline = Instant::now() + port.timeout();
 
     loop {
         if Instant::now() >= deadline {
-            return Err(io::Error::new(io::ErrorKind::TimedOut, "frame read timeout"));
+            return Err(SerialError::Timeout);
         }
 
         let mut sync = [0u8; 1];
@@ -421,7 +430,7 @@ mod tests {
     }
 
     #[test]
-    fn registry_insert_get_remove() {
+    fn registry_id_generation() {
         let reg = Registry::new();
 
         // Can't easily test with real SerialPort, but we can test the ID generation

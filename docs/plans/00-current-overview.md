@@ -69,7 +69,7 @@ Core structs and state:
 - RT buffer length: 16 float values (trigger params, user values)
 
 Key functions:
-- `vscopeInit()`
+- `vscopeInit(device_name, isr_khz)`
   - Initializes buffers/state, sets defaults, sets device name
   - Defines channel pointers and channel names
 - `vscopeAcquire()`

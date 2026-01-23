@@ -44,6 +44,7 @@ Notes:
 - `u8` protocol_version
 - `u8` channel_count
 - `u16` buffer_size
+- `u16` isr_khz (nearest kHz)
 - `u8` var_count
 - `u8` rt_count
 - `u8` rt_buffer_len
@@ -64,7 +65,7 @@ Notes:
 
 ### `0x05` SET_STATE
 **Request payload:** `u8 state`  
-**Response data:** `u8 state`
+**Response data:** `u8 state` (current state readback)
 
 Valid states:
 - `0` HALTED
@@ -179,6 +180,5 @@ Returned as payload of `0xFF` ERROR frames.
 
 - `0x01` BAD_LEN
 - `0x02` BAD_PARAM
-- `0x03` BAD_STATE
 - `0x04` RANGE
 - `0x05` NOT_READY

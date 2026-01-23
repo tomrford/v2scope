@@ -14,7 +14,7 @@ Items identified during code review of Rust and C implementations.
 
 ### Local config file needed
 Application needs persistent config file for:
-- [ ] Frame timeout setting (default 100ms, tunable)
+- [ ] Frame timeout setting (tunable, minimum 50ms enforced by UI)
 - [ ] Serial port history (previously used ports)
 - [ ] Last-used serial settings per port (baud, data bits, parity, stop bits)
 - [ ] Live buffer size (default TBD)

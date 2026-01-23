@@ -6,7 +6,6 @@
 typedef enum {
     VSCOPE_ERR_BAD_LEN = 1,
     VSCOPE_ERR_BAD_PARAM = 2,
-    VSCOPE_ERR_BAD_STATE = 3,
     VSCOPE_ERR_RANGE = 4,
     VSCOPE_ERR_NOT_READY = 5,
 } VscopeStatus;
@@ -228,12 +227,14 @@ static bool vscope_update_channel_map(const uint8_t* ids) {
 }
 
 static void vscope_handle_get_info(void) {
-    uint8_t data[8 + VSCOPE_DEVICE_NAME_LEN];
+    uint8_t data[10 + VSCOPE_DEVICE_NAME_LEN];
     uint16_t offset = 0U;
 
     data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
     data[offset++] = (uint8_t)vscope.n_ch;
     vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
+    offset = (uint16_t)(offset + 2U);
+    vscope_write_u16(&data[offset], vscope.isr_khz);
     offset = (uint16_t)(offset + 2U);
     data[offset++] = var_count;
     data[offset++] = rt_count;
@@ -414,7 +415,7 @@ static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_
         requested_count = payload[1];
     }
 
-    if (start_idx >= var_count) {
+    if (start_idx > var_count) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
@@ -504,7 +505,7 @@ static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload
         requested_count = payload[1];
     }
 
-    if (start_idx >= rt_count) {
+    if (start_idx > rt_count) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
@@ -786,7 +787,7 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
     }
 }
 
-void vscopeInit(const char* device_name) {
+void vscopeInit(const char* device_name, uint16_t isr_khz) {
     memset(&vscope, 0, sizeof(vscope));
     memset(&vscope_errors, 0, sizeof(vscope_errors));
     snapshot_valid = false;
@@ -794,11 +795,12 @@ void vscopeInit(const char* device_name) {
 
     vscope.state = VSCOPE_HALTED;
     vscope.request = VSCOPE_HALTED;
-    vscope.buffer_size = VSCOPE_BUFFER_SIZE;
+    vscope.buffer_size = (uint16_t)VSCOPE_BUFFER_SIZE;
     vscope.n_ch = VSCOPE_NUM_CHANNELS;
     vscope.pre_trig = 0U;
     vscope.divider = 1U;
     vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
+    vscope.isr_khz = isr_khz;
 
     vscope.index = 0U;
     vscope.first_element = 0U;

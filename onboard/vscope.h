@@ -71,13 +71,14 @@ typedef struct {
     float* frame[VSCOPE_NUM_CHANNELS];
     float buffer[VSCOPE_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
 
-    uint32_t buffer_size;
+    uint16_t buffer_size;
     uint32_t n_ch;
     uint32_t divider;
     uint32_t pre_trig;
     uint32_t acq_time;
     uint32_t index;
     uint32_t first_element;
+    uint16_t isr_khz;
 
     float trigger_threshold;
     uint8_t trigger_channel;
@@ -100,7 +101,7 @@ void vscopeRegisterRtBuffer(const char* name, float* ptr);
 // Feed raw serial bytes into the parser.
 void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us);
 
-void vscopeInit(const char* device_name);
+void vscopeInit(const char* device_name, uint16_t isr_khz);
 void vscopeAcquire(void);
 void vscopeTrigger(void);
 
