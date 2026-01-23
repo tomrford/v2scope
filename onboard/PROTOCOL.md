@@ -17,6 +17,7 @@
 - **Max frame size**: 256 bytes (SYNC + LEN + 254)
 
 **Practical limits**:
+
 - 63 float32 values per payload (252 bytes)
 - 12 samples per snapshot chunk when `VSCOPE_NUM_CHANNELS = 5`
 - 14 variable labels per GET_VAR_LIST page
@@ -31,6 +32,7 @@ Errors are returned as a dedicated error frame:
 - **Payload**: `u8 error_code`
 
 Notes:
+
 - Error frames are sent **only** for requests that pass framing + CRC checks.
 - If LEN/CRC is invalid, the device drops the frame and sends no response.
 - Hosts should treat timeouts/IO errors (including disconnects) as transport issues; `0xFF` indicates a logical/parameter error.
@@ -38,6 +40,7 @@ Notes:
 ## Message Types
 
 ### `0x01` GET_INFO
+
 **Request:** empty payload  
 **Response data:**
 
@@ -52,36 +55,44 @@ Notes:
 - `char[VSCOPE_DEVICE_NAME_LEN]` device_name (fixed length)
 
 ### `0x02` GET_TIMING
+
 **Request:** empty payload  
 **Response data:** `u32 divider`, `u32 pre_trig`
 
 ### `0x03` SET_TIMING
+
 **Request payload:** `u32 divider`, `u32 pre_trig`  
 **Response data:** `u32 divider`, `u32 pre_trig`
 
 ### `0x04` GET_STATE
+
 **Request:** empty payload  
 **Response data:** `u8 state`
 
 ### `0x05` SET_STATE
+
 **Request payload:** `u8 state`  
 **Response data:** `u8 state` (current state readback)
 
 Valid states:
+
 - `0` HALTED
 - `1` RUNNING
 - `2` ACQUIRING
 - `3` MISCONFIGURED (read-only)
 
 ### `0x06` TRIGGER
+
 **Request:** empty payload  
 **Response:** empty payload
 
 ### `0x07` GET_FRAME
+
 **Request:** empty payload  
 **Response data:** `float[VSCOPE_NUM_CHANNELS]` (mapped channels)
 
 ### `0x08` GET_SNAPSHOT_HEADER
+
 **Request:** empty payload  
 **Response data:**
 
@@ -96,10 +107,12 @@ Valid states:
 If no valid snapshot is available, respond with error code `NOT_READY`.
 
 ### `0x09` GET_SNAPSHOT_DATA
+
 **Request payload:** `u16 start_sample`, `u8 sample_count`  
 **Response data:** `float[sample_count * VSCOPE_NUM_CHANNELS]`
 
 Notes:
+
 - `start_sample` is relative to the device's internal trigger index (`first_element`)
 - Host controls `sample_count` to adapt to noisy links
 - Max sample_count = `VSCOPE_MAX_PAYLOAD / (VSCOPE_NUM_CHANNELS * 4)`
@@ -107,6 +120,7 @@ Notes:
 - If no valid snapshot is available, respond with error code `NOT_READY`
 
 ### `0x0A` GET_VAR_LIST
+
 **Request payload (optional):**
 
 - `u8 start_idx` (default 0)
@@ -122,18 +136,22 @@ Notes:
   - `char[VSCOPE_NAME_LEN]` name
 
 ### `0x0B` GET_CHANNEL_MAP
+
 **Request:** empty payload  
 **Response data:** `u8[VSCOPE_NUM_CHANNELS]` var IDs
 
 ### `0x0C` SET_CHANNEL_MAP
-**Request payload:** `u8[VSCOPE_NUM_CHANNELS]` var IDs  
-**Response data:** `u8[VSCOPE_NUM_CHANNELS]` var IDs
+
+**Request payload:** `u8 channel_idx` + `u8 catalog_idx`
+**Response data:** `u8 channel_idx` + `u8 catalog_idx` (echo)
 
 ### `0x0D` GET_CHANNEL_LABELS
+
 **Request:** empty payload  
 **Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_NUM_CHANNELS`
 
 ### `0x0E` GET_RT_LABELS
+
 **Request payload (optional):**
 
 - `u8 start_idx` (default 0)
@@ -149,28 +167,34 @@ Notes:
   - `char[VSCOPE_NAME_LEN]` name
 
 ### `0x0F` GET_RT_BUFFER
+
 **Request payload:** `u8 index`  
 **Response data:** `float value`
 
 ### `0x10` SET_RT_BUFFER
+
 **Request payload:** `u8 index`, `float value`  
 **Response data:** `float value`
 
 ### `0x11` GET_TRIGGER
+
 **Request:** empty payload  
 **Response data:** `float threshold`, `u8 channel`, `u8 mode`
 
 Trigger modes:
+
 - `0` DISABLED
 - `1` RISING
 - `2` FALLING
 - `3` BOTH
 
 ### `0x12` SET_TRIGGER
+
 **Request payload:** `float threshold`, `u8 channel`, `u8 mode`  
 **Response data:** `float threshold`, `u8 channel`, `u8 mode`
 
 ### `0xFF` ERROR
+
 **Request:** none (response only)  
 **Response data:** `u8 error_code`
 

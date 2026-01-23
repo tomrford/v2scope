@@ -41,4 +41,4 @@ Application needs persistent config file for:
 
 - Snapshot validity timing is correct (NOT_READY during ACQUIRING is intentional)
 - Protocol is pre-release; no backward-compat effort needed yet
-- Multi-byte values use little-endian throughout (except CRSF reference which uses big-endian for some fields - we diverge intentionally)
+- Multi-byte values use native endianness; host must honor GET_INFO endianness byte

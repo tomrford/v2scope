@@ -48,3 +48,8 @@ See `docs/plans/` for detailed specs:
 - GET_INFO extended with rt_count/rt_buffer_len/name_len; name len now 16; device name provided by caller (no default).
 - First_element remains internal only; client uses GET_INFO buffer_size.
 - Rust/Tauri side still unbuilt; C code only.
+
+## TODOs
+- TS/UI: update GET_SNAPSHOT_DATA decode + requests for sample-major ordering (contiguous chunks).
+- TS/UI: update GET_VAR_LIST/GET_CHANNEL_LABELS/GET_RT_LABELS decode + request payloads (required start/count, no per-entry id).
+- TS/UI: parse GET_INFO endianness + swap all multi-byte fields when host endianness differs.

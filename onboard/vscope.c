@@ -3,9 +3,13 @@
 #include <stdbool.h>
 #include <string.h>
 
-// 63 F32 values per message
 #define VSCOPE_MAX_PAYLOAD 252
-
+#define VSCOPE_MAX_VARIABLES 32
+#define VSCOPE_NUM_CHANNELS 5
+#define VSCOPE_NAME_LEN 16
+#define VSCOPE_BUFFER_SIZE 1000
+#define VSCOPE_FRAME_TIMEOUT_US 10000
+#define VSCOPE_RT_BUFFER_LEN 16
 #define VSCOPE_SYNC_BYTE (uint8_t)(0xC8)
 
 // State enum for the state machine in the ISR function
@@ -83,6 +87,7 @@ static VscopeState vscope_state;
 static VscopeState vscope_request;
 static uint16_t vscope_isr_khz;
 static char vscope_device_name[VSCOPE_NAME_LEN];
+static uint8_t vscope_endianness;
 
 // Timing + acquisition counters
 static uint32_t vscope_divider;
@@ -106,7 +111,6 @@ static uint8_t channel_map[VSCOPE_NUM_CHANNELS];
 // Frame + capture buffers
 static float* vscope_frame[VSCOPE_NUM_CHANNELS];
 static float vscope_buffer[VSCOPE_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
-static float vscope_zero_value = 0.0f;
 
 // RT buffers
 static float* rt_values[VSCOPE_RT_BUFFER_LEN];
@@ -126,7 +130,9 @@ static uint16_t rx_index;
 static uint32_t rx_last_us;
 static uint8_t rx_buf[VSCOPE_MAX_PAYLOAD + 2];
 
-//********************** Helper functions **********************
+//*********************************************************
+// Helper Functions
+//*********************************************************
 
 // CRC8 lookup table
 static const uint8_t crc8_lut[256] = {
@@ -155,41 +161,38 @@ static uint8_t vscope_crc8(const uint8_t* data, uint16_t len) {
 
 // Read 16-bit unsigned integer
 static uint16_t vscope_read_u16(const uint8_t* data) {
-    return (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
+    uint16_t value = 0U;
+    memcpy(&value, data, sizeof(value));
+    return value;
 }
 
 // Read 32-bit unsigned integer
 static uint32_t vscope_read_u32(const uint8_t* data) {
-    return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
+    uint32_t value = 0U;
+    memcpy(&value, data, sizeof(value));
+    return value;
 }
 
 // Read 32-bit float
 static float vscope_read_f32(const uint8_t* data) {
-    uint32_t raw = vscope_read_u32(data);
     float value = 0.0f;
-    memcpy(&value, &raw, sizeof(float));
+    memcpy(&value, data, sizeof(value));
     return value;
 }
 
 // Write 16-bit unsigned integer
 static void vscope_write_u16(uint8_t* data, uint16_t value) {
-    data[0] = (uint8_t)(value & 0xFF);
-    data[1] = (uint8_t)((value >> 8) & 0xFF);
+    memcpy(data, &value, sizeof(value));
 }
 
 // Write 32-bit unsigned integer
 static void vscope_write_u32(uint8_t* data, uint32_t value) {
-    data[0] = (uint8_t)(value & 0xFF);
-    data[1] = (uint8_t)((value >> 8) & 0xFF);
-    data[2] = (uint8_t)((value >> 16) & 0xFF);
-    data[3] = (uint8_t)((value >> 24) & 0xFF);
+    memcpy(data, &value, sizeof(value));
 }
 
 // Write 32-bit float
 static void vscope_write_f32(uint8_t* data, float value) {
-    uint32_t raw = 0;
-    memcpy(&raw, &value, sizeof(float));
-    vscope_write_u32(data, raw);
+    memcpy(data, &value, sizeof(value));
 }
 
 // Write fixed-length string
@@ -198,7 +201,7 @@ static void vscope_write_str_fixed(uint8_t* dest, const char* src, size_t len) {
     if (src == NULL) {
         return;
     }
-    strncpy((char*)dest, src, len - 1U);
+    strncpy((char*)dest, src, len);
 }
 
 // Minimum of two 16-bit unsigned integers
@@ -206,7 +209,9 @@ static uint16_t vscope_min_u16(uint16_t a, uint16_t b) {
     return (a < b) ? a : b;
 }
 
-//********************** Logical functions *********************
+//*********************************************************
+// Logical Functions
+//*********************************************************
 
 // Capture snapshot metadata
 static void vscope_capture_snapshot_meta(void) {
@@ -217,7 +222,8 @@ static void vscope_capture_snapshot_meta(void) {
     }
     snapshot_meta.trigger_threshold = vscope_trigger_threshold;
     snapshot_meta.trigger_channel = vscope_trigger_channel;
-    snapshot_meta.trigger_mode = (uint8_t)vscope_trigger_mode; // TODO: can (most of) this whole function be done as a memcpy if we define 2 structs?
+    snapshot_meta.trigger_mode =
+        (uint8_t)vscope_trigger_mode; // TODO: can (most of) this whole function be done as a memcpy if we define 2 structs?
 
     snapshot_rt_count = rt_count; // TODO: I'm not sure this is needed; the rt_count stops changing after init is called.
     for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
@@ -251,7 +257,8 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint8_t payl
         offset = (uint16_t)(offset + payload_len);
     }
 
-    frame[offset++] = vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U)); // TODO: does the crc in crsf go over the sync byte or just type + data?
+    frame[offset++] =
+        vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U)); // TODO: does the crc in crsf go over the sync byte or just type + data?
 
     vscopeTxBytes(frame, offset);
 }
@@ -271,34 +278,23 @@ static void vscope_send_payload(uint8_t type, const uint8_t* data, uint16_t data
 }
 
 // Get catalog index for a given channel
-static uint8_t vscope_get_mapped_channel(uint8_t channel) {
-    if (channel >= VSCOPE_NUM_CHANNELS) {
+static uint8_t vscope_get_mapped_channel(uint8_t channel_idx) {
+    if (channel_idx >= VSCOPE_NUM_CHANNELS) {
         return 0U;
     }
-    return channel_map[channel];
+    return channel_map[channel_idx];
 }
 
-// Write a new channel map
-static bool vscope_update_channel_map(const uint8_t* ids) {
-    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        if (ids[i] >= var_count) {
-            return false;
-        }
-    }
+//*********************************************************
+// Message Handlers
+//*********************************************************
 
-    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        channel_map[i] = ids[i];
-        vscope_frame[i] = var_catalog[ids[i]].ptr;
-    }
-
-    return true;
-}
+// INFO
 
 static void vscope_handle_get_info(void) {
     uint8_t data[10 + VSCOPE_NAME_LEN];
     uint16_t offset = 0U;
 
-    data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
     data[offset++] = (uint8_t)VSCOPE_NUM_CHANNELS;
     vscope_write_u16(&data[offset], (uint16_t)VSCOPE_BUFFER_SIZE);
     offset = (uint16_t)(offset + 2U);
@@ -308,23 +304,23 @@ static void vscope_handle_get_info(void) {
     data[offset++] = rt_count;
     data[offset++] = (uint8_t)VSCOPE_RT_BUFFER_LEN;
     data[offset++] = (uint8_t)VSCOPE_NAME_LEN;
+    data[offset++] = vscope_endianness;
     vscope_write_str_fixed(&data[offset], vscope_device_name, VSCOPE_NAME_LEN);
 
     vscope_send_payload(VSCOPE_MSG_GET_INFO, data, sizeof(data));
 }
 
-static void vscope_handle_get_timing(void) {
-    uint8_t data[8];
-    vscope_write_u32(&data[0], vscope_divider);
-    vscope_write_u32(&data[4], vscope_pre_trig);
-    vscope_send_payload(VSCOPE_MSG_GET_TIMING, data, sizeof(data));
-}
+// TIMING
 
 static void vscope_send_timing(uint8_t type) {
     uint8_t data[8];
     vscope_write_u32(&data[0], vscope_divider);
     vscope_write_u32(&data[4], vscope_pre_trig);
     vscope_send_payload(type, data, sizeof(data));
+}
+
+static void vscope_handle_get_timing(void) {
+    vscope_send_timing(VSCOPE_MSG_GET_TIMING);
 }
 
 static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_len) {
@@ -352,16 +348,16 @@ static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_le
     vscope_send_timing(VSCOPE_MSG_SET_TIMING);
 }
 
-static void vscope_handle_get_state(void) {
-    uint8_t data[1];
-    data[0] = (uint8_t)vscope_state;
-    vscope_send_payload(VSCOPE_MSG_GET_STATE, data, sizeof(data));
-}
+// STATE
 
 static void vscope_send_state(uint8_t type) {
     uint8_t data[1];
     data[0] = (uint8_t)vscope_state;
     vscope_send_payload(type, data, sizeof(data));
+}
+
+static void vscope_handle_get_state(void) {
+    vscope_send_state(VSCOPE_MSG_GET_STATE);
 }
 
 static void vscope_handle_set_state(const uint8_t* payload, uint16_t payload_len) {
@@ -380,10 +376,14 @@ static void vscope_handle_set_state(const uint8_t* payload, uint16_t payload_len
     vscope_send_state(VSCOPE_MSG_SET_STATE);
 }
 
+// TRIGGER
+
 static void vscope_handle_trigger(void) {
     vscopeTrigger();
     vscope_send_payload(VSCOPE_MSG_TRIGGER, NULL, 0U);
 }
+
+// FRAME
 
 static void vscope_handle_get_frame(void) {
     uint8_t data[VSCOPE_NUM_CHANNELS * 4];
@@ -396,6 +396,8 @@ static void vscope_handle_get_frame(void) {
 
     vscope_send_payload(VSCOPE_MSG_GET_FRAME, data, sizeof(data));
 }
+
+// SNAPSHOT
 
 static void vscope_handle_get_snapshot_header(void) {
     if (!snapshot_valid) {
@@ -441,13 +443,13 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
     uint16_t start_sample = vscope_read_u16(payload);
     uint8_t requested_count = payload[2];
 
-    if (start_sample >= (uint16_t)VSCOPE_BUFFER_SIZE || requested_count == 0U || requested_count > (uint16_t)VSCOPE_BUFFER_SIZE) {
+    if (start_sample >= (uint16_t)VSCOPE_BUFFER_SIZE || requested_count == 0U) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    uint32_t end_sample = (uint32_t)start_sample + (uint32_t)requested_count;
-    if (end_sample > (uint32_t)VSCOPE_BUFFER_SIZE) {
+    uint16_t end_sample = (uint16_t)(start_sample + (uint16_t)requested_count);
+    if (end_sample > (uint16_t)VSCOPE_BUFFER_SIZE) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
@@ -461,42 +463,44 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
     uint8_t data[VSCOPE_MAX_PAYLOAD];
     uint16_t offset = 0U;
 
-    for (uint8_t i = 0U; i < requested_count; i += 1U) {
-        uint16_t sample_index = (uint16_t)((vscope_first_element + start_sample + i) % (uint32_t)VSCOPE_BUFFER_SIZE);
-        for (uint8_t ch = 0U; ch < VSCOPE_NUM_CHANNELS; ch += 1U) {
-            vscope_write_f32(&data[offset], vscope_buffer[sample_index][ch]);
-            offset = (uint16_t)(offset + 4U);
-        }
+    uint16_t requested_count_u16 = (uint16_t)requested_count;
+    uint16_t sample_index = (uint16_t)((vscope_first_element + start_sample) % (uint32_t)VSCOPE_BUFFER_SIZE);
+    uint16_t max_contiguous = (uint16_t)(VSCOPE_BUFFER_SIZE - sample_index);
+    uint16_t first_samples = (requested_count_u16 <= max_contiguous) ? requested_count_u16 : max_contiguous;
+    uint16_t first_bytes = (uint16_t)(first_samples * (uint16_t)VSCOPE_NUM_CHANNELS * 4U);
+
+    memcpy(&data[offset], &vscope_buffer[sample_index][0], first_bytes);
+    offset = (uint16_t)(offset + first_bytes);
+
+    if (first_samples < requested_count_u16) {
+        uint16_t remaining = (uint16_t)(requested_count_u16 - first_samples);
+        uint16_t second_bytes = (uint16_t)(remaining * (uint16_t)VSCOPE_NUM_CHANNELS * 4U);
+        memcpy(&data[offset], &vscope_buffer[0][0], second_bytes);
+        offset = (uint16_t)(offset + second_bytes);
     }
 
     vscope_send_payload(VSCOPE_MSG_GET_SNAPSHOT_DATA, data, offset);
 }
 
-static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_len) {
-    uint8_t start_idx = 0U;
-    uint8_t requested_count = 0xFFU;
+// VAR LIST
 
-    if (payload_len > 2U) {
+static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 2U) {
         vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
-    if (payload_len >= 1U) {
-        start_idx = payload[0];
-    }
-    if (payload_len >= 2U) {
-        requested_count = payload[1];
-    }
+    uint8_t start_idx = payload[0];
+    uint8_t requested_count = payload[1];
 
     if (start_idx > var_count) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    uint16_t entry_size = (uint16_t)(1U + VSCOPE_NAME_LEN);
-    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
+    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / (uint16_t)VSCOPE_NAME_LEN);
     uint16_t available = (uint16_t)(var_count - start_idx);
-    uint16_t desired = (requested_count == 0xFFU) ? available : requested_count;
+    uint16_t desired = (uint16_t)requested_count;
     uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
 
     uint8_t data[VSCOPE_MAX_PAYLOAD];
@@ -507,7 +511,6 @@ static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_
 
     for (uint16_t i = 0U; i < count; i += 1U) {
         uint8_t id = (uint8_t)(start_idx + i);
-        data[offset++] = id;
         vscope_write_str_fixed(&data[offset], var_catalog[id].name, VSCOPE_NAME_LEN);
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
@@ -515,42 +518,64 @@ static void vscope_handle_get_var_list(const uint8_t* payload, uint16_t payload_
     vscope_send_payload(VSCOPE_MSG_GET_VAR_LIST, data, offset);
 }
 
-static void vscope_handle_get_channel_map(void) {
-    uint8_t data[VSCOPE_NUM_CHANNELS];
-    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        data[i] = channel_map[i];
-    }
-    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_MAP, data, sizeof(data));
-}
+// CHANNEL MAP
 
-static void vscope_send_channel_map(uint8_t type) {
-    uint8_t data[VSCOPE_NUM_CHANNELS];
-    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        data[i] = channel_map[i];
-    }
-    vscope_send_payload(type, data, sizeof(data));
+static void vscope_handle_get_channel_map(void) {
+    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_MAP, channel_map, (uint16_t)VSCOPE_NUM_CHANNELS);
 }
 
 static void vscope_handle_set_channel_map(const uint8_t* payload, uint16_t payload_len) {
-    if (payload_len != VSCOPE_NUM_CHANNELS) {
+    if (payload_len != 2U) {
         vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
-    if (!vscope_update_channel_map(payload)) {
+    uint8_t channel_idx = payload[0];
+    uint8_t catalog_idx = payload[1];
+
+    if (channel_idx >= VSCOPE_NUM_CHANNELS || catalog_idx >= var_count) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    vscope_send_channel_map(VSCOPE_MSG_SET_CHANNEL_MAP);
+    channel_map[channel_idx] = catalog_idx;
+    vscope_frame[channel_idx] = var_catalog[catalog_idx].ptr;
+
+    uint8_t data[2] = { channel_idx, catalog_idx };
+    vscope_send_payload(VSCOPE_MSG_SET_CHANNEL_MAP, data, sizeof(data));
 }
 
-static void vscope_handle_get_channel_labels(void) {
-    uint8_t data[VSCOPE_NUM_CHANNELS * VSCOPE_NAME_LEN];
-    uint16_t offset = 0U;
+// CHANNEL LABELS
 
-    for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        uint8_t id = vscope_get_mapped_channel(i);
+static void vscope_handle_get_channel_labels(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 2U) {
+        vscope_send_error(VSCOPE_ERR_BAD_LEN);
+        return;
+    }
+
+    uint8_t start_idx = payload[0];
+    uint8_t requested_count = payload[1];
+
+    if (start_idx > (uint8_t)VSCOPE_NUM_CHANNELS) {
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    uint16_t entry_size = (uint16_t)VSCOPE_NAME_LEN;
+    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
+    uint16_t available = (uint16_t)(VSCOPE_NUM_CHANNELS - start_idx);
+    uint16_t desired = (uint16_t)requested_count;
+    uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
+
+    uint8_t data[VSCOPE_MAX_PAYLOAD];
+    uint16_t offset = 0U;
+    data[offset++] = (uint8_t)VSCOPE_NUM_CHANNELS;
+    data[offset++] = start_idx;
+    data[offset++] = (uint8_t)count;
+
+    for (uint16_t i = 0U; i < count; i += 1U) {
+        uint8_t channel_idx = (uint8_t)(start_idx + i);
+        uint8_t id = vscope_get_mapped_channel(channel_idx);
         if (id < var_count) {
             vscope_write_str_fixed(&data[offset], var_catalog[id].name, VSCOPE_NAME_LEN);
         } else {
@@ -559,34 +584,29 @@ static void vscope_handle_get_channel_labels(void) {
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
 
-    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_LABELS, data, sizeof(data));
+    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_LABELS, data, offset);
 }
 
-static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload_len) {
-    uint8_t start_idx = 0U;
-    uint8_t requested_count = 0xFFU;
+// RT LABELS
 
-    if (payload_len > 2U) {
+static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload_len) {
+    if (payload_len != 2U) {
         vscope_send_error(VSCOPE_ERR_BAD_LEN);
         return;
     }
 
-    if (payload_len >= 1U) {
-        start_idx = payload[0];
-    }
-    if (payload_len >= 2U) {
-        requested_count = payload[1];
-    }
+    uint8_t start_idx = payload[0];
+    uint8_t requested_count = payload[1];
 
     if (start_idx > rt_count) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    uint16_t entry_size = (uint16_t)(1U + VSCOPE_NAME_LEN);
+    uint16_t entry_size = (uint16_t)VSCOPE_NAME_LEN;
     uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
     uint16_t available = (uint16_t)(rt_count - start_idx);
-    uint16_t desired = (requested_count == 0xFFU) ? available : requested_count;
+    uint16_t desired = (uint16_t)requested_count;
     uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
 
     uint8_t data[VSCOPE_MAX_PAYLOAD];
@@ -597,12 +617,17 @@ static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload
 
     for (uint16_t i = 0U; i < count; i += 1U) {
         uint8_t id = (uint8_t)(start_idx + i);
-        data[offset++] = id;
         vscope_write_str_fixed(&data[offset], rt_names[id], VSCOPE_NAME_LEN);
         offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
     }
 
     vscope_send_payload(VSCOPE_MSG_GET_RT_LABELS, data, offset);
+}
+
+// RT BUFFER
+
+static void vscope_send_rt_buffer_value(uint8_t type, uint8_t idx) {
+    vscope_send_payload(type, (const uint8_t*)rt_values[idx], sizeof(float));
 }
 
 static void vscope_handle_get_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
@@ -617,15 +642,7 @@ static void vscope_handle_get_rt_buffer(const uint8_t* payload, uint16_t payload
         return;
     }
 
-    uint8_t data[4];
-    vscope_write_f32(data, *(rt_values[idx]));
-    vscope_send_payload(VSCOPE_MSG_GET_RT_BUFFER, data, sizeof(data));
-}
-
-static void vscope_send_rt_buffer_value(uint8_t type, uint8_t idx) {
-    uint8_t data[4];
-    vscope_write_f32(data, *(rt_values[idx]));
-    vscope_send_payload(type, data, sizeof(data));
+    vscope_send_rt_buffer_value(VSCOPE_MSG_GET_RT_BUFFER, idx);
 }
 
 static void vscope_handle_set_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
@@ -645,13 +662,7 @@ static void vscope_handle_set_rt_buffer(const uint8_t* payload, uint16_t payload
     vscope_send_rt_buffer_value(VSCOPE_MSG_SET_RT_BUFFER, idx);
 }
 
-static void vscope_handle_get_trigger(void) {
-    uint8_t data[6];
-    vscope_write_f32(&data[0], vscope_trigger_threshold);
-    data[4] = vscope_trigger_channel;
-    data[5] = (uint8_t)vscope_trigger_mode;
-    vscope_send_payload(VSCOPE_MSG_GET_TRIGGER, data, sizeof(data));
-}
+// TRIGGER
 
 static void vscope_send_trigger(uint8_t type) {
     uint8_t data[6];
@@ -659,6 +670,10 @@ static void vscope_send_trigger(uint8_t type) {
     data[4] = vscope_trigger_channel;
     data[5] = (uint8_t)vscope_trigger_mode;
     vscope_send_payload(type, data, sizeof(data));
+}
+
+static void vscope_handle_get_trigger(void) {
+    vscope_send_trigger(VSCOPE_MSG_GET_TRIGGER);
 }
 
 static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_len) {
@@ -683,7 +698,17 @@ static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_l
     vscope_send_trigger(VSCOPE_MSG_SET_TRIGGER);
 }
 
+// MESSAGE HANDLER
+
 static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t payload_len) {
+    // When misconfigured, only allow diagnostic queries
+    if (vscope_state == VSCOPE_MISCONFIGURED) {
+        if (type != VSCOPE_MSG_GET_INFO && type != VSCOPE_MSG_GET_STATE && type != VSCOPE_MSG_GET_VAR_LIST) {
+            vscope_send_error(VSCOPE_ERR_NOT_READY);
+            return;
+        }
+    }
+
     switch (type) {
         case VSCOPE_MSG_GET_INFO:
             if (payload_len != 0U) {
@@ -750,11 +775,7 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
             vscope_handle_set_channel_map(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_CHANNEL_LABELS:
-            if (payload_len != 0U) {
-                vscope_send_error(VSCOPE_ERR_BAD_LEN);
-            } else {
-                vscope_handle_get_channel_labels();
-            }
+            vscope_handle_get_channel_labels(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_RT_LABELS:
             vscope_handle_get_rt_labels(payload, payload_len);
@@ -781,6 +802,10 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
     }
 }
 
+//*********************************************************
+// Public Functions
+//*********************************************************
+
 void vscopeRegisterVar(const char* name, float* ptr) {
     if (registration_locked || var_count >= VSCOPE_MAX_VARIABLES || ptr == NULL) {
         return;
@@ -788,7 +813,7 @@ void vscopeRegisterVar(const char* name, float* ptr) {
 
     memset(var_catalog[var_count].name, 0, VSCOPE_NAME_LEN);
     if (name != NULL) {
-        strncpy(var_catalog[var_count].name, name, VSCOPE_NAME_LEN - 1U);
+        strncpy(var_catalog[var_count].name, name, VSCOPE_NAME_LEN);
     }
     var_catalog[var_count].ptr = ptr;
     var_count += 1U;
@@ -801,13 +826,13 @@ void vscopeRegisterRtBuffer(const char* name, float* ptr) {
 
     memset(rt_names[rt_count], 0, VSCOPE_NAME_LEN);
     if (name != NULL) {
-        strncpy(rt_names[rt_count], name, VSCOPE_NAME_LEN - 1U);
+        strncpy(rt_names[rt_count], name, VSCOPE_NAME_LEN);
     }
     rt_values[rt_count] = ptr;
     rt_count += 1U;
 }
 
-void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
+void vscopeRxHandler(const uint8_t* data, size_t len, uint32_t now_us) {
     if (data == NULL || len == 0U) {
         return;
     }
@@ -858,57 +883,53 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
     }
 }
 
-void vscopeInit(const char* device_name, uint16_t isr_khz) {
+void vscopeInit(const char* device_name, uint16_t isr_khz, uint8_t endianness) {
+    // State + configuration
     vscope_state = VSCOPE_HALTED;
     vscope_request = VSCOPE_HALTED;
-    memset(vscope_frame, 0, sizeof(vscope_frame));
-    memset(vscope_buffer, 0, sizeof(vscope_buffer));
-    vscope_divider = 0U;
-    vscope_pre_trig = 0U;
-    vscope_acq_time = 0U;
-    vscope_index = 0U;
-    vscope_first_element = 0U;
-    vscope_isr_khz = 0U;
-    vscope_trigger_threshold = 0.0f;
-    vscope_trigger_channel = 0U;
-    vscope_trigger_mode = VSCOPE_TRG_DISABLED;
-    memset(vscope_device_name, 0, sizeof(vscope_device_name));
-    snapshot_valid = false;
-    snapshot_rt_count = 0U;
-    trigger_invalid = true;
-
-    vscope_pre_trig = 0U;
-    vscope_divider = 1U;
-    vscope_acq_time = (uint32_t)VSCOPE_BUFFER_SIZE - vscope_pre_trig;
     vscope_isr_khz = isr_khz;
 
+    memset(vscope_device_name, 0, sizeof(vscope_device_name));
+    vscope_write_str_fixed((uint8_t*)vscope_device_name, device_name, VSCOPE_NAME_LEN);
+
+    vscope_endianness = VSCOPE_ENDIAN_LITTLE;
+    if (endianness <= VSCOPE_ENDIAN_BIG) {
+        vscope_endianness = endianness;
+    }
+
+    // Timing + acquisition counters
+    vscope_divider = 1U;
+    vscope_pre_trig = 0U;
+    vscope_acq_time = (uint32_t)VSCOPE_BUFFER_SIZE - vscope_pre_trig;
     vscope_index = 0U;
     vscope_first_element = 0U;
 
-    vscope_write_str_fixed((uint8_t*)vscope_device_name, device_name, VSCOPE_NAME_LEN);
-
-    registration_locked = true;
-    if (var_count < VSCOPE_NUM_CHANNELS) {
-        vscope_state = VSCOPE_MISCONFIGURED;
-    }
-
-    if (var_count == 0U) {
-        for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-            channel_map[i] = 0U;
-            vscope_frame[i] = &vscope_zero_value;
-        }
-    } else {
-        for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-            channel_map[i] = (i < var_count) ? i : 0U;
-            vscope_frame[i] = var_catalog[channel_map[i]].ptr;
-        }
-    }
-
-    memset(vscope_buffer, 0, sizeof(vscope_buffer));
-
+    // Trigger configuration
     vscope_trigger_threshold = 0.0f;
     vscope_trigger_channel = 0U;
     vscope_trigger_mode = VSCOPE_TRG_DISABLED;
+    trigger_invalid = true;
+
+    // Variable registry + channel map
+    memset(vscope_frame, 0, sizeof(vscope_frame));
+    memset(channel_map, 0, sizeof(channel_map));
+    registration_locked = true;
+
+    if (var_count < VSCOPE_NUM_CHANNELS) {
+        vscope_state = VSCOPE_MISCONFIGURED;
+    } else {
+        for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
+            channel_map[i] = i;
+            vscope_frame[i] = var_catalog[i].ptr;
+        }
+    }
+
+    // Frame + capture buffers
+    memset(vscope_buffer, 0, sizeof(vscope_buffer));
+
+    // Snapshot data
+    snapshot_valid = false;
+    snapshot_rt_count = 0U;
 }
 
 static void vscope_save_frame(void) {
@@ -956,6 +977,10 @@ static void vscope_check_trigger(void) {
 void vscopeAcquire(void) {
     static uint32_t divider_ticks = 0U;
     static uint16_t run_index = 0U;
+
+    if (vscope_state == VSCOPE_MISCONFIGURED) {
+        return;
+    }
 
     divider_ticks += 1U;
     if (divider_ticks < vscope_divider) {
@@ -1009,11 +1034,4 @@ void vscopeTrigger(void) {
     if (vscope_state == VSCOPE_RUNNING) {
         vscope_request = VSCOPE_ACQUIRING;
     }
-}
-
-float vscopeGetRtBuffer(uint8_t index) {
-    if (index >= rt_count) {
-        return 0.0f;
-    }
-    return *(rt_values[index]);
 }

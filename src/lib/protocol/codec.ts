@@ -151,7 +151,7 @@ export const decodeFrameResponse = (payload: Uint8Array, info: DeviceInfo): Fram
   return FrameResponseSchema.parse({ values });
 };
 
-/** Decode GET_CHANNEL_MAP / SET_CHANNEL_MAP response. Requires DeviceInfo. */
+/** Decode GET_CHANNEL_MAP response. Requires DeviceInfo. */
 export const decodeChannelMapResponse = (
   payload: Uint8Array,
   info: DeviceInfo
@@ -166,6 +166,23 @@ export const decodeChannelMapResponse = (
     varIds.push(readU8(payload, i));
   }
   return ChannelMapResponseSchema.parse({ varIds });
+};
+
+/** Response from SET_CHANNEL_MAP: echoes the updated single channel. */
+export interface SetChannelMapResponse {
+  channelIdx: number;
+  catalogIdx: number;
+}
+
+/** Decode SET_CHANNEL_MAP response. Returns the echoed channel mapping. */
+export const decodeSetChannelMapResponse = (payload: Uint8Array): SetChannelMapResponse => {
+  if (payload.length !== 2) {
+    throw new Error(`SetChannelMapResponse wrong size: ${payload.length} vs expected 2`);
+  }
+  return {
+    channelIdx: readU8(payload, 0),
+    catalogIdx: readU8(payload, 1),
+  };
 };
 
 /** Decode GET_CHANNEL_LABELS response. Requires DeviceInfo. */
@@ -415,13 +432,15 @@ export const encodeGetChannelMapRequest = (): Uint8Array => {
   return new Uint8Array([MessageType.GET_CHANNEL_MAP]);
 };
 
-/** Encode SET_CHANNEL_MAP request. */
-export const encodeSetChannelMapRequest = (varIds: number[]): Uint8Array => {
-  const buf = new Uint8Array(1 + varIds.length);
+/** Encode SET_CHANNEL_MAP request. Updates a single channel. */
+export const encodeSetChannelMapRequest = (
+  channelIdx: number,
+  catalogIdx: number
+): Uint8Array => {
+  const buf = new Uint8Array(3); // TYPE + channelIdx + catalogIdx
   buf[0] = MessageType.SET_CHANNEL_MAP;
-  for (let i = 0; i < varIds.length; i++) {
-    writeU8(buf, 1 + i, varIds[i]);
-  }
+  writeU8(buf, 1, channelIdx);
+  writeU8(buf, 2, catalogIdx);
   return buf;
 };
 

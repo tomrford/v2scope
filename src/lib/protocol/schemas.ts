@@ -97,7 +97,8 @@ export const SetStateRequestSchema = z.object({
 export type SetStateRequest = z.infer<typeof SetStateRequestSchema>;
 
 export const SetChannelMapRequestSchema = z.object({
-  varIds: z.array(z.number().int().nonnegative()),
+  channelIdx: z.number().int().nonnegative(),
+  catalogIdx: z.number().int().nonnegative(),
 });
 export type SetChannelMapRequest = z.infer<typeof SetChannelMapRequestSchema>;
 

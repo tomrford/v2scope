@@ -8,6 +8,7 @@ import {
   decodeTriggerResponse,
   decodeFrameResponse,
   decodeChannelMapResponse,
+  decodeSetChannelMapResponse,
   decodeChannelLabelsResponse,
   decodeVarListResponse,
   decodeRtLabelsResponse,
@@ -194,6 +195,20 @@ describe("decodeChannelMapResponse", () => {
 
   it("throws on wrong size", () => {
     expect(() => decodeChannelMapResponse(new Uint8Array(3), testDeviceInfo)).toThrow("wrong size");
+  });
+});
+
+describe("decodeSetChannelMapResponse", () => {
+  it("decodes single channel update echo", () => {
+    const payload = new Uint8Array([2, 5]); // channelIdx=2, catalogIdx=5
+    const result = decodeSetChannelMapResponse(payload);
+    expect(result.channelIdx).toBe(2);
+    expect(result.catalogIdx).toBe(5);
+  });
+
+  it("throws on wrong size", () => {
+    expect(() => decodeSetChannelMapResponse(new Uint8Array(3))).toThrow("wrong size");
+    expect(() => decodeSetChannelMapResponse(new Uint8Array(1))).toThrow("wrong size");
   });
 });
 
@@ -452,10 +467,12 @@ describe("encodeGetChannelMapRequest", () => {
 });
 
 describe("encodeSetChannelMapRequest", () => {
-  it("encodes var IDs", () => {
-    const result = encodeSetChannelMapRequest([0, 1, 2, 3, 4]);
+  it("encodes channel and catalog index", () => {
+    const result = encodeSetChannelMapRequest(2, 5);
     expect(result[0]).toBe(MessageType.SET_CHANNEL_MAP);
-    expect(Array.from(result.slice(1))).toEqual([0, 1, 2, 3, 4]);
+    expect(result[1]).toBe(2); // channelIdx
+    expect(result[2]).toBe(5); // catalogIdx
+    expect(result.length).toBe(3);
   });
 });
 

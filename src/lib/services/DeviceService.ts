@@ -30,6 +30,8 @@ import {
   decodeTriggerResponse,
   decodeFrameResponse,
   decodeChannelMapResponse,
+  decodeSetChannelMapResponse,
+  type SetChannelMapResponse,
   decodeChannelLabelsResponse,
   decodeVarListResponse,
   decodeRtLabelsResponse,
@@ -103,8 +105,9 @@ export interface DeviceServiceShape {
   ) => Effect.Effect<ChannelMapResponse, DeviceError>;
   readonly setChannelMap: (
     handle: DeviceHandle,
-    varIds: number[]
-  ) => Effect.Effect<void, DeviceError>;
+    channelIdx: number,
+    catalogIdx: number
+  ) => Effect.Effect<SetChannelMapResponse, DeviceError>;
   readonly getChannelLabels: (
     handle: DeviceHandle,
     info: DeviceInfo
@@ -240,11 +243,11 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
       decodeChannelMapResponse(payload, info)
     ),
 
-  setChannelMap: (handle, varIds) =>
+  setChannelMap: (handle, channelIdx, catalogIdx) =>
     makeProtocolRequest(
       handle,
-      () => encodeSetChannelMapRequest(varIds),
-      () => undefined
+      () => encodeSetChannelMapRequest(channelIdx, catalogIdx),
+      decodeSetChannelMapResponse
     ),
 
   getChannelLabels: (handle, info) =>
