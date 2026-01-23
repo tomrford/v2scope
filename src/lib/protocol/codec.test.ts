@@ -36,7 +36,7 @@ import {
 } from "./codec";
 import { MessageType, State, TriggerMode, ErrorCode } from "./types";
 import type { DeviceInfo } from "./device-info";
-import { writeU32LE, writeF32LE, writeU16LE } from "../bytes";
+import { writeU32LE, writeF32LE, writeU16LE } from "./bytes";
 
 // Test fixture: typical device info
 const testDeviceInfo: DeviceInfo = {

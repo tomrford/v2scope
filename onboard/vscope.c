@@ -3,6 +3,28 @@
 #include <stdbool.h>
 #include <string.h>
 
+// 63 F32 values per message
+#define VSCOPE_MAX_PAYLOAD 252
+
+#define VSCOPE_SYNC_BYTE (uint8_t)(0xC8)
+
+// State enum for the state machine in the ISR function
+typedef enum {
+    VSCOPE_HALTED = 0,
+    VSCOPE_RUNNING = 1,
+    VSCOPE_ACQUIRING = 2,
+    VSCOPE_MISCONFIGURED = 3,
+} VscopeState;
+
+// Trigger mode enum
+typedef enum {
+    VSCOPE_TRG_DISABLED = 0,
+    VSCOPE_TRG_RISING = 1,
+    VSCOPE_TRG_FALLING = 2,
+    VSCOPE_TRG_BOTH = 3,
+} VscopeTriggerMode;
+
+// Error codes
 typedef enum {
     VSCOPE_ERR_BAD_LEN = 1,
     VSCOPE_ERR_BAD_PARAM = 2,
@@ -10,6 +32,7 @@ typedef enum {
     VSCOPE_ERR_NOT_READY = 5,
 } VscopeStatus;
 
+// Message types
 typedef enum {
     VSCOPE_MSG_GET_INFO = 0x01,
     VSCOPE_MSG_GET_TIMING = 0x02,
@@ -32,17 +55,20 @@ typedef enum {
     VSCOPE_MSG_ERROR = 0xFF,
 } VscopeMessageType;
 
+// RX state machine states
 typedef enum {
     VS_RX_IDLE = 0,
     VS_RX_LEN = 1,
     VS_RX_DATA = 2,
 } VscopeRxState;
 
+// Variable struct
 typedef struct {
     char name[VSCOPE_NAME_LEN];
     float* ptr;
 } VscopeVar;
 
+// Snapshot metadata struct
 typedef struct {
     uint32_t divider;
     uint32_t pre_trig;
@@ -52,30 +78,57 @@ typedef struct {
     uint8_t trigger_mode;
 } VscopeSnapshotMeta;
 
-VscopeStruct vscope;
+// State + configuration
+static VscopeState vscope_state;
+static VscopeState vscope_request;
+static uint16_t vscope_isr_khz;
+static char vscope_device_name[VSCOPE_NAME_LEN];
 
-static VscopeErrors vscope_errors;
+// Timing + acquisition counters
+static uint32_t vscope_divider;
+static uint32_t vscope_pre_trig;
+static uint32_t vscope_acq_time;
+static uint32_t vscope_index;
+static uint32_t vscope_first_element;
 
+// Trigger configuration
+static float vscope_trigger_threshold;
+static uint8_t vscope_trigger_channel;
+static VscopeTriggerMode vscope_trigger_mode;
+static bool trigger_invalid;
+
+// Variable registry + channel map
 static VscopeVar var_catalog[VSCOPE_MAX_VARIABLES];
 static uint8_t var_count;
 static bool registration_locked;
-
 static uint8_t channel_map[VSCOPE_NUM_CHANNELS];
-static float *rt_values[VSCOPE_RT_BUFFER_LEN];
+
+// Frame + capture buffers
+static float* vscope_frame[VSCOPE_NUM_CHANNELS];
+static float vscope_buffer[VSCOPE_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
+static float vscope_zero_value = 0.0f;
+
+// RT buffers
+static float* rt_values[VSCOPE_RT_BUFFER_LEN];
 static char rt_names[VSCOPE_RT_BUFFER_LEN][VSCOPE_NAME_LEN];
 static uint8_t rt_count;
-static float vscope_zero_value = 0.0f;
+
+// Snapshot data
 static VscopeSnapshotMeta snapshot_meta;
 static float snapshot_rt_values[VSCOPE_RT_BUFFER_LEN];
 static uint8_t snapshot_rt_count;
 static bool snapshot_valid;
 
+// RX state
 static VscopeRxState rx_state;
 static uint16_t rx_expected_len;
 static uint16_t rx_index;
 static uint32_t rx_last_us;
 static uint8_t rx_buf[VSCOPE_MAX_PAYLOAD + 2];
 
+//********************** Helper functions **********************
+
+// CRC8 lookup table
 static const uint8_t crc8_lut[256] = {
     0x00, 0xD5, 0x7F, 0xAA, 0xFE, 0x2B, 0x81, 0x54, 0x29, 0xFC, 0x56, 0x83, 0xD7, 0x02, 0xA8, 0x7D, 0x52, 0x87, 0x2D, 0xF8, 0xAC, 0x79,
     0xD3, 0x06, 0x7B, 0xAE, 0x04, 0xD1, 0x85, 0x50, 0xFA, 0x2F, 0xA4, 0x71, 0xDB, 0x0E, 0x5A, 0x8F, 0x25, 0xF0, 0x8D, 0x58, 0xF2, 0x27,
@@ -91,6 +144,7 @@ static const uint8_t crc8_lut[256] = {
     0xFB, 0x2E, 0x7A, 0xAF, 0x05, 0xD0, 0xAD, 0x78, 0xD2, 0x07, 0x53, 0x86, 0x2C, 0xF9,
 };
 
+// Calculate CRC8
 static uint8_t vscope_crc8(const uint8_t* data, uint16_t len) {
     uint8_t crc = 0;
     for (uint16_t i = 0; i < len; i += 1U) {
@@ -99,14 +153,17 @@ static uint8_t vscope_crc8(const uint8_t* data, uint16_t len) {
     return crc;
 }
 
+// Read 16-bit unsigned integer
 static uint16_t vscope_read_u16(const uint8_t* data) {
     return (uint16_t)(data[0] | ((uint16_t)data[1] << 8));
 }
 
+// Read 32-bit unsigned integer
 static uint32_t vscope_read_u32(const uint8_t* data) {
     return (uint32_t)data[0] | ((uint32_t)data[1] << 8) | ((uint32_t)data[2] << 16) | ((uint32_t)data[3] << 24);
 }
 
+// Read 32-bit float
 static float vscope_read_f32(const uint8_t* data) {
     uint32_t raw = vscope_read_u32(data);
     float value = 0.0f;
@@ -114,11 +171,13 @@ static float vscope_read_f32(const uint8_t* data) {
     return value;
 }
 
+// Write 16-bit unsigned integer
 static void vscope_write_u16(uint8_t* data, uint16_t value) {
     data[0] = (uint8_t)(value & 0xFF);
     data[1] = (uint8_t)((value >> 8) & 0xFF);
 }
 
+// Write 32-bit unsigned integer
 static void vscope_write_u32(uint8_t* data, uint32_t value) {
     data[0] = (uint8_t)(value & 0xFF);
     data[1] = (uint8_t)((value >> 8) & 0xFF);
@@ -126,12 +185,14 @@ static void vscope_write_u32(uint8_t* data, uint32_t value) {
     data[3] = (uint8_t)((value >> 24) & 0xFF);
 }
 
+// Write 32-bit float
 static void vscope_write_f32(uint8_t* data, float value) {
     uint32_t raw = 0;
     memcpy(&raw, &value, sizeof(float));
     vscope_write_u32(data, raw);
 }
 
+// Write fixed-length string
 static void vscope_write_str_fixed(uint8_t* dest, const char* src, size_t len) {
     memset(dest, 0, len);
     if (src == NULL) {
@@ -140,36 +201,39 @@ static void vscope_write_str_fixed(uint8_t* dest, const char* src, size_t len) {
     strncpy((char*)dest, src, len - 1U);
 }
 
+// Minimum of two 16-bit unsigned integers
 static uint16_t vscope_min_u16(uint16_t a, uint16_t b) {
     return (a < b) ? a : b;
 }
 
+//********************** Logical functions *********************
+
+// Capture snapshot metadata
 static void vscope_capture_snapshot_meta(void) {
-    snapshot_meta.divider = vscope.divider;
-    snapshot_meta.pre_trig = vscope.pre_trig;
+    snapshot_meta.divider = vscope_divider;
+    snapshot_meta.pre_trig = vscope_pre_trig;
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
         snapshot_meta.channel_map[i] = channel_map[i];
     }
-    snapshot_meta.trigger_threshold = vscope.trigger_threshold;
-    snapshot_meta.trigger_channel = vscope.trigger_channel;
-    snapshot_meta.trigger_mode = (uint8_t)vscope.trigger_mode;
+    snapshot_meta.trigger_threshold = vscope_trigger_threshold;
+    snapshot_meta.trigger_channel = vscope_trigger_channel;
+    snapshot_meta.trigger_mode = (uint8_t)vscope_trigger_mode; // TODO: can (most of) this whole function be done as a memcpy if we define 2 structs?
 
-    snapshot_rt_count = rt_count;
+    snapshot_rt_count = rt_count; // TODO: I'm not sure this is needed; the rt_count stops changing after init is called.
     for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
         snapshot_rt_values[i] = *(rt_values[i]);
     }
 }
 
-static void vscope_reset_rx(bool count_timeout) {
-    if (count_timeout && rx_state != VS_RX_IDLE && rx_index > 0U) {
-        vscope_errors.timeout += 1U;
-    }
+// Reset RX state
+static void vscope_reset_rx(void) {
     rx_state = VS_RX_IDLE;
     rx_expected_len = 0U;
     rx_index = 0U;
 }
 
-static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t payload_len) {
+// Send frame
+static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint8_t payload_len) {
     if (payload_len > VSCOPE_MAX_PAYLOAD) {
         return;
     }
@@ -178,7 +242,7 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t pay
     uint8_t len_field = (uint8_t)(payload_len + 2U);
     uint16_t offset = 0U;
 
-    frame[offset++] = (uint8_t)VSCOPE_SYNC_BYTE;
+    frame[offset++] = VSCOPE_SYNC_BYTE;
     frame[offset++] = len_field;
     frame[offset++] = type;
 
@@ -187,15 +251,17 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint16_t pay
         offset = (uint16_t)(offset + payload_len);
     }
 
-    frame[offset++] = vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U));
+    frame[offset++] = vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U)); // TODO: does the crc in crsf go over the sync byte or just type + data?
 
     vscopeTxBytes(frame, offset);
 }
 
+// Send error
 static void vscope_send_error(uint8_t error_code) {
     vscope_send_frame(VSCOPE_MSG_ERROR, &error_code, 1U);
 }
 
+// Send payload
 static void vscope_send_payload(uint8_t type, const uint8_t* data, uint16_t data_len) {
     if (data_len > VSCOPE_MAX_PAYLOAD) {
         vscope_send_error(VSCOPE_ERR_BAD_LEN);
@@ -204,6 +270,7 @@ static void vscope_send_payload(uint8_t type, const uint8_t* data, uint16_t data
     vscope_send_frame(type, data, data_len);
 }
 
+// Get catalog index for a given channel
 static uint8_t vscope_get_mapped_channel(uint8_t channel) {
     if (channel >= VSCOPE_NUM_CHANNELS) {
         return 0U;
@@ -211,6 +278,7 @@ static uint8_t vscope_get_mapped_channel(uint8_t channel) {
     return channel_map[channel];
 }
 
+// Write a new channel map
 static bool vscope_update_channel_map(const uint8_t* ids) {
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
         if (ids[i] >= var_count) {
@@ -220,42 +288,42 @@ static bool vscope_update_channel_map(const uint8_t* ids) {
 
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
         channel_map[i] = ids[i];
-        vscope.frame[i] = var_catalog[ids[i]].ptr;
+        vscope_frame[i] = var_catalog[ids[i]].ptr;
     }
 
     return true;
 }
 
 static void vscope_handle_get_info(void) {
-    uint8_t data[10 + VSCOPE_DEVICE_NAME_LEN];
+    uint8_t data[10 + VSCOPE_NAME_LEN];
     uint16_t offset = 0U;
 
     data[offset++] = (uint8_t)VSCOPE_PROTOCOL_VERSION;
-    data[offset++] = (uint8_t)vscope.n_ch;
-    vscope_write_u16(&data[offset], (uint16_t)vscope.buffer_size);
+    data[offset++] = (uint8_t)VSCOPE_NUM_CHANNELS;
+    vscope_write_u16(&data[offset], (uint16_t)VSCOPE_BUFFER_SIZE);
     offset = (uint16_t)(offset + 2U);
-    vscope_write_u16(&data[offset], vscope.isr_khz);
+    vscope_write_u16(&data[offset], vscope_isr_khz);
     offset = (uint16_t)(offset + 2U);
     data[offset++] = var_count;
     data[offset++] = rt_count;
     data[offset++] = (uint8_t)VSCOPE_RT_BUFFER_LEN;
-    data[offset++] = (uint8_t)VSCOPE_DEVICE_NAME_LEN;
-    vscope_write_str_fixed(&data[offset], vscope.device_name, VSCOPE_DEVICE_NAME_LEN);
+    data[offset++] = (uint8_t)VSCOPE_NAME_LEN;
+    vscope_write_str_fixed(&data[offset], vscope_device_name, VSCOPE_NAME_LEN);
 
     vscope_send_payload(VSCOPE_MSG_GET_INFO, data, sizeof(data));
 }
 
 static void vscope_handle_get_timing(void) {
     uint8_t data[8];
-    vscope_write_u32(&data[0], vscope.divider);
-    vscope_write_u32(&data[4], vscope.pre_trig);
+    vscope_write_u32(&data[0], vscope_divider);
+    vscope_write_u32(&data[4], vscope_pre_trig);
     vscope_send_payload(VSCOPE_MSG_GET_TIMING, data, sizeof(data));
 }
 
 static void vscope_send_timing(uint8_t type) {
     uint8_t data[8];
-    vscope_write_u32(&data[0], vscope.divider);
-    vscope_write_u32(&data[4], vscope.pre_trig);
+    vscope_write_u32(&data[0], vscope_divider);
+    vscope_write_u32(&data[4], vscope_pre_trig);
     vscope_send_payload(type, data, sizeof(data));
 }
 
@@ -268,26 +336,31 @@ static void vscope_handle_set_timing(const uint8_t* payload, uint16_t payload_le
     uint32_t divider = vscope_read_u32(&payload[0]);
     uint32_t pre_trig = vscope_read_u32(&payload[4]);
 
-    if (divider == 0U || pre_trig > vscope.buffer_size) {
+    if (divider == 0U || pre_trig > (uint32_t)VSCOPE_BUFFER_SIZE) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
-    vscope.divider = divider;
-    vscope.pre_trig = pre_trig;
-    vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
+    if (vscope_state != VSCOPE_HALTED) {
+        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
+        return;
+    }
+
+    vscope_divider = divider;
+    vscope_pre_trig = pre_trig;
+    vscope_acq_time = (uint32_t)VSCOPE_BUFFER_SIZE - vscope_pre_trig;
     vscope_send_timing(VSCOPE_MSG_SET_TIMING);
 }
 
 static void vscope_handle_get_state(void) {
     uint8_t data[1];
-    data[0] = (uint8_t)vscope.state;
+    data[0] = (uint8_t)vscope_state;
     vscope_send_payload(VSCOPE_MSG_GET_STATE, data, sizeof(data));
 }
 
 static void vscope_send_state(uint8_t type) {
     uint8_t data[1];
-    data[0] = (uint8_t)vscope.state;
+    data[0] = (uint8_t)vscope_state;
     vscope_send_payload(type, data, sizeof(data));
 }
 
@@ -303,7 +376,7 @@ static void vscope_handle_set_state(const uint8_t* payload, uint16_t payload_len
         return;
     }
 
-    vscope.request = (VscopeState)requested;
+    vscope_request = (VscopeState)requested;
     vscope_send_state(VSCOPE_MSG_SET_STATE);
 }
 
@@ -317,7 +390,7 @@ static void vscope_handle_get_frame(void) {
     uint16_t offset = 0U;
 
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        vscope_write_f32(&data[offset], *(vscope.frame[i]));
+        vscope_write_f32(&data[offset], *(vscope_frame[i]));
         offset = (uint16_t)(offset + 4U);
     }
 
@@ -368,13 +441,13 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
     uint16_t start_sample = vscope_read_u16(payload);
     uint8_t requested_count = payload[2];
 
-    if (start_sample >= vscope.buffer_size || requested_count == 0U || requested_count > vscope.buffer_size) {
+    if (start_sample >= (uint16_t)VSCOPE_BUFFER_SIZE || requested_count == 0U || requested_count > (uint16_t)VSCOPE_BUFFER_SIZE) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
 
     uint32_t end_sample = (uint32_t)start_sample + (uint32_t)requested_count;
-    if (end_sample > vscope.buffer_size) {
+    if (end_sample > (uint32_t)VSCOPE_BUFFER_SIZE) {
         vscope_send_error(VSCOPE_ERR_BAD_PARAM);
         return;
     }
@@ -389,9 +462,9 @@ static void vscope_handle_get_snapshot_data(const uint8_t* payload, uint16_t pay
     uint16_t offset = 0U;
 
     for (uint8_t i = 0U; i < requested_count; i += 1U) {
-        uint16_t sample_index = (uint16_t)((vscope.first_element + start_sample + i) % vscope.buffer_size);
+        uint16_t sample_index = (uint16_t)((vscope_first_element + start_sample + i) % (uint32_t)VSCOPE_BUFFER_SIZE);
         for (uint8_t ch = 0U; ch < VSCOPE_NUM_CHANNELS; ch += 1U) {
-            vscope_write_f32(&data[offset], vscope.buffer[sample_index][ch]);
+            vscope_write_f32(&data[offset], vscope_buffer[sample_index][ch]);
             offset = (uint16_t)(offset + 4U);
         }
     }
@@ -574,17 +647,17 @@ static void vscope_handle_set_rt_buffer(const uint8_t* payload, uint16_t payload
 
 static void vscope_handle_get_trigger(void) {
     uint8_t data[6];
-    vscope_write_f32(&data[0], vscope.trigger_threshold);
-    data[4] = vscope.trigger_channel;
-    data[5] = (uint8_t)vscope.trigger_mode;
+    vscope_write_f32(&data[0], vscope_trigger_threshold);
+    data[4] = vscope_trigger_channel;
+    data[5] = (uint8_t)vscope_trigger_mode;
     vscope_send_payload(VSCOPE_MSG_GET_TRIGGER, data, sizeof(data));
 }
 
 static void vscope_send_trigger(uint8_t type) {
     uint8_t data[6];
-    vscope_write_f32(&data[0], vscope.trigger_threshold);
-    data[4] = vscope.trigger_channel;
-    data[5] = (uint8_t)vscope.trigger_mode;
+    vscope_write_f32(&data[0], vscope_trigger_threshold);
+    data[4] = vscope_trigger_channel;
+    data[5] = (uint8_t)vscope_trigger_mode;
     vscope_send_payload(type, data, sizeof(data));
 }
 
@@ -603,9 +676,10 @@ static void vscope_handle_set_trigger(const uint8_t* payload, uint16_t payload_l
         return;
     }
 
-    vscope.trigger_threshold = threshold;
-    vscope.trigger_channel = channel;
-    vscope.trigger_mode = (VscopeTriggerMode)mode;
+    vscope_trigger_threshold = threshold;
+    vscope_trigger_channel = channel;
+    vscope_trigger_mode = (VscopeTriggerMode)mode;
+    trigger_invalid = true;
     vscope_send_trigger(VSCOPE_MSG_SET_TRIGGER);
 }
 
@@ -739,7 +813,7 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
     }
 
     if (rx_state != VS_RX_IDLE && (uint32_t)(now_us - rx_last_us) > VSCOPE_FRAME_TIMEOUT_US) {
-        vscope_reset_rx(true);
+        vscope_reset_rx();
     }
 
     for (size_t i = 0U; i < len; i += 1U) {
@@ -747,7 +821,7 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
 
         switch (rx_state) {
             case VS_RX_IDLE:
-                if (byte == (uint8_t)VSCOPE_SYNC_BYTE) {
+                if (byte == VSCOPE_SYNC_BYTE) {
                     rx_state = VS_RX_LEN;
                     rx_last_us = now_us;
                 }
@@ -755,8 +829,7 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
             case VS_RX_LEN:
                 rx_expected_len = byte;
                 if (rx_expected_len < 2U || rx_expected_len > (uint16_t)(VSCOPE_MAX_PAYLOAD + 2U)) {
-                    vscope_errors.len_invalid += 1U;
-                    vscope_reset_rx(false);
+                    vscope_reset_rx();
                 } else {
                     rx_index = 0U;
                     rx_state = VS_RX_DATA;
@@ -774,91 +847,104 @@ void vscopeFeed(const uint8_t* data, size_t len, uint32_t now_us) {
                         const uint8_t* payload = &rx_buf[1];
                         uint16_t payload_len = (uint16_t)(rx_expected_len - 2U);
                         vscope_handle_frame(type, payload, payload_len);
-                    } else {
-                        vscope_errors.crc_fail += 1U;
                     }
-                    vscope_reset_rx(false);
+                    vscope_reset_rx();
                 }
                 break;
             default:
-                vscope_reset_rx(false);
+                vscope_reset_rx();
                 break;
         }
     }
 }
 
 void vscopeInit(const char* device_name, uint16_t isr_khz) {
-    memset(&vscope, 0, sizeof(vscope));
-    memset(&vscope_errors, 0, sizeof(vscope_errors));
+    vscope_state = VSCOPE_HALTED;
+    vscope_request = VSCOPE_HALTED;
+    memset(vscope_frame, 0, sizeof(vscope_frame));
+    memset(vscope_buffer, 0, sizeof(vscope_buffer));
+    vscope_divider = 0U;
+    vscope_pre_trig = 0U;
+    vscope_acq_time = 0U;
+    vscope_index = 0U;
+    vscope_first_element = 0U;
+    vscope_isr_khz = 0U;
+    vscope_trigger_threshold = 0.0f;
+    vscope_trigger_channel = 0U;
+    vscope_trigger_mode = VSCOPE_TRG_DISABLED;
+    memset(vscope_device_name, 0, sizeof(vscope_device_name));
     snapshot_valid = false;
     snapshot_rt_count = 0U;
+    trigger_invalid = true;
 
-    vscope.state = VSCOPE_HALTED;
-    vscope.request = VSCOPE_HALTED;
-    vscope.buffer_size = (uint16_t)VSCOPE_BUFFER_SIZE;
-    vscope.n_ch = VSCOPE_NUM_CHANNELS;
-    vscope.pre_trig = 0U;
-    vscope.divider = 1U;
-    vscope.acq_time = vscope.buffer_size - vscope.pre_trig;
-    vscope.isr_khz = isr_khz;
+    vscope_pre_trig = 0U;
+    vscope_divider = 1U;
+    vscope_acq_time = (uint32_t)VSCOPE_BUFFER_SIZE - vscope_pre_trig;
+    vscope_isr_khz = isr_khz;
 
-    vscope.index = 0U;
-    vscope.first_element = 0U;
+    vscope_index = 0U;
+    vscope_first_element = 0U;
 
-    vscope_write_str_fixed((uint8_t*)vscope.device_name, device_name, VSCOPE_DEVICE_NAME_LEN);
+    vscope_write_str_fixed((uint8_t*)vscope_device_name, device_name, VSCOPE_NAME_LEN);
 
     registration_locked = true;
     if (var_count < VSCOPE_NUM_CHANNELS) {
-        vscope.state = VSCOPE_MISCONFIGURED;
+        vscope_state = VSCOPE_MISCONFIGURED;
     }
 
     if (var_count == 0U) {
         for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
             channel_map[i] = 0U;
-            vscope.frame[i] = &vscope_zero_value;
+            vscope_frame[i] = &vscope_zero_value;
         }
     } else {
         for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
             channel_map[i] = (i < var_count) ? i : 0U;
-            vscope.frame[i] = var_catalog[channel_map[i]].ptr;
+            vscope_frame[i] = var_catalog[channel_map[i]].ptr;
         }
     }
 
-    memset(vscope.buffer, 0, sizeof(vscope.buffer));
+    memset(vscope_buffer, 0, sizeof(vscope_buffer));
 
-    vscope.trigger_threshold = 0.0f;
-    vscope.trigger_channel = 0U;
-    vscope.trigger_mode = VSCOPE_TRG_DISABLED;
+    vscope_trigger_threshold = 0.0f;
+    vscope_trigger_channel = 0U;
+    vscope_trigger_mode = VSCOPE_TRG_DISABLED;
 }
 
 static void vscope_save_frame(void) {
     for (uint8_t i = 0U; i < VSCOPE_NUM_CHANNELS; i += 1U) {
-        vscope.buffer[vscope.index][i] = *(vscope.frame[i]);
+        vscope_buffer[vscope_index][i] = *(vscope_frame[i]);
     }
 
-    vscope.index += 1U;
-    if (vscope.index >= vscope.buffer_size) {
-        vscope.index = 0U;
+    vscope_index += 1U;
+    if (vscope_index >= (uint32_t)VSCOPE_BUFFER_SIZE) {
+        vscope_index = 0U;
     }
 }
 
 static void vscope_check_trigger(void) {
     static float last_delta = 0.0f;
 
-    float current_delta = *(vscope.frame[vscope.trigger_channel]) - vscope.trigger_threshold;
+    float current_delta = *(vscope_frame[vscope_trigger_channel]) - vscope_trigger_threshold;
 
-    if (vscope.trigger_mode == VSCOPE_TRG_DISABLED) {
+    if (trigger_invalid) {
+        last_delta = current_delta;
+        trigger_invalid = false;
+        return;
+    }
+
+    if (vscope_trigger_mode == VSCOPE_TRG_DISABLED) {
         last_delta = current_delta;
         return;
     }
 
     if ((current_delta * last_delta) < 0.0f) {
         if (current_delta > 0.0f) {
-            if (vscope.trigger_mode != VSCOPE_TRG_FALLING) {
+            if (vscope_trigger_mode != VSCOPE_TRG_FALLING) {
                 vscopeTrigger();
             }
         } else {
-            if (vscope.trigger_mode != VSCOPE_TRG_RISING) {
+            if (vscope_trigger_mode != VSCOPE_TRG_RISING) {
                 vscopeTrigger();
             }
         }
@@ -872,42 +958,42 @@ void vscopeAcquire(void) {
     static uint16_t run_index = 0U;
 
     divider_ticks += 1U;
-    if (divider_ticks < vscope.divider) {
+    if (divider_ticks < vscope_divider) {
         return;
     }
     divider_ticks = 0U;
 
     vscope_check_trigger();
 
-    switch (vscope.state) {
+    switch (vscope_state) {
         case VSCOPE_HALTED:
-            vscope.index = 0U;
-            if (vscope.request == VSCOPE_RUNNING) {
-                vscope.state = VSCOPE_RUNNING;
+            vscope_index = 0U;
+            if (vscope_request == VSCOPE_RUNNING) {
+                vscope_state = VSCOPE_RUNNING;
                 snapshot_valid = false;
             }
             break;
         case VSCOPE_RUNNING:
-            if (vscope.request == VSCOPE_HALTED) {
-                vscope.state = VSCOPE_HALTED;
+            if (vscope_request == VSCOPE_HALTED) {
+                vscope_state = VSCOPE_HALTED;
             }
-            if (vscope.request == VSCOPE_ACQUIRING) {
+            if (vscope_request == VSCOPE_ACQUIRING) {
                 vscope_capture_snapshot_meta();
-                if (vscope.acq_time == 0U) {
-                    vscope.state = VSCOPE_HALTED;
-                    vscope.first_element = vscope.index;
+                if (vscope_acq_time == 0U) {
+                    vscope_state = VSCOPE_HALTED;
+                    vscope_first_element = vscope_index;
                     snapshot_valid = true;
                 } else {
-                    vscope.state = VSCOPE_ACQUIRING;
+                    vscope_state = VSCOPE_ACQUIRING;
                     run_index = 1U;
                 }
             }
             vscope_save_frame();
             break;
         case VSCOPE_ACQUIRING:
-            if (run_index == vscope.acq_time) {
-                vscope.state = VSCOPE_HALTED;
-                vscope.first_element = vscope.index;
+            if (run_index == vscope_acq_time) {
+                vscope_state = VSCOPE_HALTED;
+                vscope_first_element = vscope_index;
                 snapshot_valid = true;
             } else {
                 run_index += 1U;
@@ -920,13 +1006,9 @@ void vscopeAcquire(void) {
 }
 
 void vscopeTrigger(void) {
-    if (vscope.state == VSCOPE_RUNNING) {
-        vscope.request = VSCOPE_ACQUIRING;
+    if (vscope_state == VSCOPE_RUNNING) {
+        vscope_request = VSCOPE_ACQUIRING;
     }
-}
-
-VscopeErrors vscopeGetErrors(void) {
-    return vscope_errors;
 }
 
 float vscopeGetRtBuffer(uint8_t index) {
@@ -934,27 +1016,4 @@ float vscopeGetRtBuffer(uint8_t index) {
         return 0.0f;
     }
     return *(rt_values[index]);
-}
-
-void vscopeSetRtBuffer(uint8_t index, float value) {
-    if (index >= rt_count) {
-        return;
-    }
-    *(rt_values[index]) = value;
-}
-
-void vscopeSetTriggerThreshold(float threshold) {
-    vscope.trigger_threshold = threshold;
-}
-
-void vscopeSetTriggerChannel(uint32_t channel) {
-    VSCOPE_ASSERT(channel < VSCOPE_NUM_CHANNELS);
-    if (channel >= VSCOPE_NUM_CHANNELS) {
-        return;
-    }
-    vscope.trigger_channel = (uint8_t)channel;
-}
-
-void vscopeSetTriggerMode(VscopeTriggerMode mode) {
-    vscope.trigger_mode = mode;
 }

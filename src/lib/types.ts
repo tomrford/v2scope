@@ -3,7 +3,7 @@ import { z } from "zod";
 export const SerialConfigSchema = z.object({
   baudRate: z.number().int().positive(),
   dataBits: z.enum(["5", "6", "7", "8"]),
-  parity: z.enum(["none", "odd", "even", "mark", "space"]),
+  parity: z.enum(["none", "odd", "even"]),
   stopBits: z.enum(["1", "2"]),
   readTimeoutMs: z.number().int().nonnegative(),
 });
@@ -17,6 +17,18 @@ export const PortFilterSchema = z.object({
 });
 
 export type PortFilter = z.infer<typeof PortFilterSchema>;
+
+export const PortInfoSchema = z.object({
+  path: z.string(),
+  vid: z.number().int().nullable(),
+  pid: z.number().int().nullable(),
+  manufacturer: z.string().nullable(),
+  product: z.string().nullable(),
+  serialNumber: z.string().nullable(),
+  portType: z.enum(["usb", "bluetooth", "pci", "unknown"]),
+});
+
+export type PortInfo = z.infer<typeof PortInfoSchema>;
 
 export const OpenDeviceInputSchema = z.object({
   path: z.string().min(1),

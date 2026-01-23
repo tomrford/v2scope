@@ -11,7 +11,9 @@ use std::time::{Duration, Instant};
 
 const VSCOPE_SYNC_BYTE: u8 = 0xC8;
 const MAX_FRAME_LEN: usize = 254;
-const MAX_PAYLOAD_LEN: usize = 252;
+// Payload here includes TYPE + PAYLOAD bytes. C side allows 252 payload bytes,
+// so max (TYPE + PAYLOAD) is 253.
+const MAX_PAYLOAD_LEN: usize = 253;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -415,17 +417,17 @@ mod tests {
 
     #[test]
     fn build_frame_larger_payload() {
-        let payload = vec![0xAA; 252];
+        let payload = vec![0xAA; 253];
         let frame = build_frame(&payload).unwrap();
 
-        assert_eq!(frame.len(), 1 + 1 + 252 + 1);
+        assert_eq!(frame.len(), 1 + 1 + 253 + 1);
         let len_field = frame[1];
-        assert_eq!(len_field, 253); // 252 + 1 for crc
+        assert_eq!(len_field, 254); // 253 + 1 for crc
     }
 
     #[test]
     fn build_frame_too_large() {
-        let payload = vec![0xAA; 253];
+        let payload = vec![0xAA; 254];
         assert!(build_frame(&payload).is_err());
     }
 
