@@ -120,7 +120,6 @@ static uint8_t rt_count;
 // Snapshot data
 static VscopeSnapshotMeta snapshot_meta;
 static float snapshot_rt_values[VSCOPE_RT_BUFFER_LEN];
-static uint8_t snapshot_rt_count;
 static bool snapshot_valid;
 
 // RX state
@@ -222,11 +221,9 @@ static void vscope_capture_snapshot_meta(void) {
     }
     snapshot_meta.trigger_threshold = vscope_trigger_threshold;
     snapshot_meta.trigger_channel = vscope_trigger_channel;
-    snapshot_meta.trigger_mode =
-        (uint8_t)vscope_trigger_mode; // TODO: can (most of) this whole function be done as a memcpy if we define 2 structs?
+    snapshot_meta.trigger_mode = (uint8_t)vscope_trigger_mode;
 
-    snapshot_rt_count = rt_count; // TODO: I'm not sure this is needed; the rt_count stops changing after init is called.
-    for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
+    for (uint8_t i = 0U; i < rt_count; i += 1U) {
         snapshot_rt_values[i] = *(rt_values[i]);
     }
 }
@@ -257,8 +254,7 @@ static void vscope_send_frame(uint8_t type, const uint8_t* payload, uint8_t payl
         offset = (uint16_t)(offset + payload_len);
     }
 
-    frame[offset++] =
-        vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U)); // TODO: does the crc in crsf go over the sync byte or just type + data?
+    frame[offset++] = vscope_crc8(&frame[2], (uint16_t)(payload_len + 1U));
 
     vscopeTxBytes(frame, offset);
 }
@@ -421,7 +417,7 @@ static void vscope_handle_get_snapshot_header(void) {
     data[offset++] = snapshot_meta.trigger_channel;
     data[offset++] = snapshot_meta.trigger_mode;
 
-    for (uint8_t i = 0U; i < snapshot_rt_count; i += 1U) {
+    for (uint8_t i = 0U; i < rt_count; i += 1U) {
         vscope_write_f32(&data[offset], snapshot_rt_values[i]);
         offset = (uint16_t)(offset + 4U);
     }
@@ -929,7 +925,6 @@ void vscopeInit(const char* device_name, uint16_t isr_khz, uint8_t endianness) {
 
     // Snapshot data
     snapshot_valid = false;
-    snapshot_rt_count = 0U;
 }
 
 static void vscope_save_frame(void) {
