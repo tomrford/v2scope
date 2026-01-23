@@ -9,19 +9,18 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant};
 
+// Protocol constants matching the code in onboard/vscope.c
 const VSCOPE_SYNC_BYTE: u8 = 0xC8;
 const MAX_FRAME_LEN: usize = 254;
-// Payload here includes TYPE + PAYLOAD bytes. C side allows 252 payload bytes,
-// so max (TYPE + PAYLOAD) is 253.
-const MAX_PAYLOAD_LEN: usize = 253;
+const MAX_PAYLOAD_LEN: usize = 252;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SerialConfig {
     pub baud_rate: u32,
-    pub data_bits: String,
-    pub parity: String,
-    pub stop_bits: String,
+    pub data_bits: DataBits,
+    pub parity: Parity,
+    pub stop_bits: StopBits,
     pub read_timeout_ms: u64,
 }
 
@@ -122,17 +121,17 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, SerialEr
             }
         }
         if let Some(name_filter) = name_filter.as_ref() {
-            let mut haystack = port.port_name.to_lowercase();
-            if let Some(value) = manufacturer.as_ref() {
-                haystack.push_str(&value.to_lowercase());
-            }
-            if let Some(value) = product.as_ref() {
-                haystack.push_str(&value.to_lowercase());
-            }
-            if let Some(value) = serial_number.as_ref() {
-                haystack.push_str(&value.to_lowercase());
-            }
-            if !haystack.contains(name_filter) {
+            let matches = port.port_name.to_lowercase().contains(name_filter)
+                || manufacturer
+                    .as_ref()
+                    .is_some_and(|v| v.to_lowercase().contains(name_filter))
+                || product
+                    .as_ref()
+                    .is_some_and(|v| v.to_lowercase().contains(name_filter))
+                || serial_number
+                    .as_ref()
+                    .is_some_and(|v| v.to_lowercase().contains(name_filter));
+            if !matches {
                 continue;
             }
         }
@@ -154,9 +153,9 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, SerialEr
 #[tauri::command]
 pub fn open_device(path: String, config: SerialConfig) -> Result<u64, SerialError> {
     let builder = serialport::new(&path, config.baud_rate)
-        .data_bits(parse_data_bits(&config.data_bits)?)
-        .parity(parse_parity(&config.parity)?)
-        .stop_bits(parse_stop_bits(&config.stop_bits)?)
+        .data_bits(config.data_bits)
+        .parity(config.parity)
+        .stop_bits(config.stop_bits)
         .flow_control(FlowControl::None)
         .timeout(Duration::from_millis(config.read_timeout_ms));
 
@@ -210,42 +209,9 @@ pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, SerialE
     read_frame(&mut **port)
 }
 
-fn parse_data_bits(value: &str) -> Result<DataBits, SerialError> {
-    match value.to_lowercase().as_str() {
-        "5" | "five" => Ok(DataBits::Five),
-        "6" | "six" => Ok(DataBits::Six),
-        "7" | "seven" => Ok(DataBits::Seven),
-        "8" | "eight" => Ok(DataBits::Eight),
-        _ => Err(SerialError::InvalidConfig {
-            message: format!("unsupported data_bits: {value}"),
-        }),
-    }
-}
-
-fn parse_parity(value: &str) -> Result<Parity, SerialError> {
-    match value.to_lowercase().as_str() {
-        "none" => Ok(Parity::None),
-        "odd" => Ok(Parity::Odd),
-        "even" => Ok(Parity::Even),
-        _ => Err(SerialError::InvalidConfig {
-            message: format!("unsupported parity: {value}"),
-        }),
-    }
-}
-
-fn parse_stop_bits(value: &str) -> Result<StopBits, SerialError> {
-    match value.to_lowercase().as_str() {
-        "1" | "one" => Ok(StopBits::One),
-        "2" | "two" => Ok(StopBits::Two),
-        _ => Err(SerialError::InvalidConfig {
-            message: format!("unsupported stop_bits: {value}"),
-        }),
-    }
-}
-
 fn build_frame(payload: &[u8]) -> Result<Vec<u8>, SerialError> {
     let payload_len = payload.len();
-    if payload_len > MAX_PAYLOAD_LEN {
+    if payload_len > (1 + MAX_PAYLOAD_LEN) {
         return Err(SerialError::PayloadTooLarge);
     }
 
@@ -343,52 +309,6 @@ mod tests {
         assert_eq!(crc8(&[0x01, 0x02, 0x03]), 0x3F);
         // Different input produces different CRC
         assert_ne!(crc8(&[0x01, 0x02, 0x03]), crc8(&[0x03, 0x02, 0x01]));
-    }
-
-    #[test]
-    fn parse_data_bits_valid() {
-        assert!(matches!(parse_data_bits("5"), Ok(DataBits::Five)));
-        assert!(matches!(parse_data_bits("five"), Ok(DataBits::Five)));
-        assert!(matches!(parse_data_bits("FIVE"), Ok(DataBits::Five)));
-        assert!(matches!(parse_data_bits("8"), Ok(DataBits::Eight)));
-        assert!(matches!(parse_data_bits("eight"), Ok(DataBits::Eight)));
-    }
-
-    #[test]
-    fn parse_data_bits_invalid() {
-        assert!(parse_data_bits("9").is_err());
-        assert!(parse_data_bits("").is_err());
-        assert!(parse_data_bits("foo").is_err());
-    }
-
-    #[test]
-    fn parse_parity_valid() {
-        assert!(matches!(parse_parity("none"), Ok(Parity::None)));
-        assert!(matches!(parse_parity("NONE"), Ok(Parity::None)));
-        assert!(matches!(parse_parity("odd"), Ok(Parity::Odd)));
-        assert!(matches!(parse_parity("even"), Ok(Parity::Even)));
-    }
-
-    #[test]
-    fn parse_parity_invalid() {
-        assert!(parse_parity("mark").is_err());
-        assert!(parse_parity("space").is_err());
-        assert!(parse_parity("").is_err());
-    }
-
-    #[test]
-    fn parse_stop_bits_valid() {
-        assert!(matches!(parse_stop_bits("1"), Ok(StopBits::One)));
-        assert!(matches!(parse_stop_bits("one"), Ok(StopBits::One)));
-        assert!(matches!(parse_stop_bits("2"), Ok(StopBits::Two)));
-        assert!(matches!(parse_stop_bits("TWO"), Ok(StopBits::Two)));
-    }
-
-    #[test]
-    fn parse_stop_bits_invalid() {
-        assert!(parse_stop_bits("3").is_err());
-        assert!(parse_stop_bits("1.5").is_err());
-        assert!(parse_stop_bits("").is_err());
     }
 
     #[test]

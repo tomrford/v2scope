@@ -98,7 +98,7 @@ interface DeviceService {
 - `ProtocolError.Range` - index out of range
 - `ProtocolError.NotReady` - snapshot not available
 - `ProtocolError.Timeout` - no response (from serial layer)
-- `ProtocolError.CrcMismatch` - response CRC invalid (from serial layer)
+- `ProtocolError.CrcMismatch` - response CRC invalid (not surfaced by current Rust serial layer; invalid frames are dropped and appear as timeouts)
 
 **Retry policy**: Linear backoff starting at 5ms (5ms, 10ms, 15ms). Max 3 retries. Configurable per-message-type (see below).
 

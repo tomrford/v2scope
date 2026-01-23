@@ -8,6 +8,8 @@ MCU firmware is baked in and rarely updated. Desktop client updates frequently. 
 
 Client maintains a table of which protocol versions support which features. UI adapts by disabling/hiding unsupported features.
 
+Note: current C protocol does **not** include a protocol_version field in GET_INFO; adopting this requires a firmware update (or switch to a capabilities bitmap).
+
 ```rust
 struct ProtocolFeatures {
     has_trigger: bool,

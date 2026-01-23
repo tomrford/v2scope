@@ -12,7 +12,7 @@
 - **SYNC**: `0xC8`
 - **LEN**: 1 byte, count of bytes after LEN (TYPE + PAYLOAD + CRC), range 2-254
 - **CRC**: CRC8 DVB-S2 (poly `0xD5`), computed over TYPE + PAYLOAD
-- **Endianness**: little-endian for all multi-byte values
+- **Endianness**: device-native; GET_INFO includes an endianness byte (host must swap if needed)
 - **Max payload**: 252 bytes (254 - TYPE - CRC)
 - **Max frame size**: 256 bytes (SYNC + LEN + 254)
 
@@ -20,7 +20,7 @@
 
 - 63 float32 values per payload (252 bytes)
 - 12 samples per snapshot chunk when `VSCOPE_NUM_CHANNELS = 5`
-- 14 variable labels per GET_VAR_LIST page
+- 15 variable labels per GET_VAR_LIST page
 
 ## Response format
 
@@ -44,7 +44,6 @@ Notes:
 **Request:** empty payload  
 **Response data:**
 
-- `u8` protocol_version
 - `u8` channel_count
 - `u16` buffer_size
 - `u16` isr_khz (nearest kHz)
@@ -52,7 +51,8 @@ Notes:
 - `u8` rt_count
 - `u8` rt_buffer_len
 - `u8` name_len
-- `char[VSCOPE_DEVICE_NAME_LEN]` device_name (fixed length)
+- `u8` endianness (`0` little, `1` big)
+- `char[name_len]` device_name (fixed length)
 
 ### `0x02` GET_TIMING
 
@@ -121,19 +121,14 @@ Notes:
 
 ### `0x0A` GET_VAR_LIST
 
-**Request payload (optional):**
-
-- `u8 start_idx` (default 0)
-- `u8 max_count` (default all)
+**Request payload:** `u8 start_idx`, `u8 max_count`
 
 **Response data:**
 
 - `u8 total_count`
 - `u8 start_idx`
 - `u8 count`
-- Repeated `count` times:
-  - `u8 id`
-  - `char[VSCOPE_NAME_LEN]` name
+- Repeated `count` times: `char[VSCOPE_NAME_LEN]` name
 
 ### `0x0B` GET_CHANNEL_MAP
 
@@ -147,24 +142,24 @@ Notes:
 
 ### `0x0D` GET_CHANNEL_LABELS
 
-**Request:** empty payload  
-**Response data:** `char[VSCOPE_NAME_LEN]` x `VSCOPE_NUM_CHANNELS`
+**Request payload:** `u8 start_idx`, `u8 max_count`  
+**Response data:**
+
+- `u8 total_count`
+- `u8 start_idx`
+- `u8 count`
+- Repeated `count` times: `char[VSCOPE_NAME_LEN]` name (mapped channel labels)
 
 ### `0x0E` GET_RT_LABELS
 
-**Request payload (optional):**
-
-- `u8 start_idx` (default 0)
-- `u8 max_count` (default all)
+**Request payload:** `u8 start_idx`, `u8 max_count`
 
 **Response data:**
 
 - `u8 total_count`
 - `u8 start_idx`
 - `u8 count`
-- Repeated `count` times:
-  - `u8 id`
-  - `char[VSCOPE_NAME_LEN]` name
+- Repeated `count` times: `char[VSCOPE_NAME_LEN]` name
 
 ### `0x0F` GET_RT_BUFFER
 

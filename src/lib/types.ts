@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+// TODO(vscope): Rust expects serialport enum encoding for dataBits/parity/stopBits (serde).
 export const SerialConfigSchema = z.object({
   baudRate: z.number().int().positive(),
   dataBits: z.enum(["5", "6", "7", "8"]),

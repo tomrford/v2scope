@@ -5,10 +5,15 @@ Items identified during code review of Rust and C implementations.
 ## Rust Issues (`src-tauri/src/serial.rs`)
 
 ### Lock poisoning handling
-- **Issue**: Using `.expect()` on lock acquisition (lines 57, 63, 68)
+- **Issue**: Using `.expect()` on lock acquisition in `src-tauri/src/serial.rs`
 - **Risk**: Panic if previous holder panicked
 - **Decision**: Acceptable for now if code "can't" panic; note but don't chase immediately
 - [ ] Document assumption that code paths don't panic
+
+### SerialConfig schema alignment
+- **Issue**: Rust expects `serialport` enums via serde (`DataBits`, `Parity`, `StopBits`)
+- **Risk**: TS/UI config still uses string enums ("5"/"6"/"7"/"8", "none"/"odd"/"even")
+- [ ] Align TS schema + UI values with Rust enum encoding
 
 ## Configuration & Persistence
 

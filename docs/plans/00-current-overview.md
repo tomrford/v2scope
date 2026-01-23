@@ -111,7 +111,7 @@ Location: `/Users/tomford/code/projects/vscope-rs`
 
 Rust core highlights:
 
-- Tauri shell + tokio-serial async device I/O
+- Tauri shell + `serialport` sync device I/O (current Rust implementation)
 - `Manager` handles multi-device fanout and response equality checks
 - More ambitious protocol ideas:
   - Additional message keys: `D` (snapshot), `d` (header), `c` (set channel)

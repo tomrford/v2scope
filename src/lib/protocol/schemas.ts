@@ -30,11 +30,13 @@ export const ChannelMapResponseSchema = z.object({
 });
 export type ChannelMapResponse = z.infer<typeof ChannelMapResponseSchema>;
 
+// TODO(vscope): C GET_CHANNEL_LABELS response includes total/start/count header.
 export const ChannelLabelsResponseSchema = z.object({
   labels: z.array(z.string()),
 });
 export type ChannelLabelsResponse = z.infer<typeof ChannelLabelsResponseSchema>;
 
+// TODO(vscope): C list entries are name-only (no id); update schema + decode.
 export const VarListEntrySchema = z.object({
   id: z.number().int().nonnegative(),
   name: z.string(),
@@ -108,12 +110,14 @@ export const GetSnapshotDataRequestSchema = z.object({
 });
 export type GetSnapshotDataRequest = z.infer<typeof GetSnapshotDataRequestSchema>;
 
+// TODO(vscope): C requires startIdx + maxCount (no empty request).
 export const GetVarListRequestSchema = z.object({
   startIdx: z.number().int().nonnegative().optional(),
   maxCount: z.number().int().positive().optional(),
 });
 export type GetVarListRequest = z.infer<typeof GetVarListRequestSchema>;
 
+// TODO(vscope): C requires startIdx + maxCount (no empty request).
 export const GetRtLabelsRequestSchema = z.object({
   startIdx: z.number().int().nonnegative().optional(),
   maxCount: z.number().int().positive().optional(),

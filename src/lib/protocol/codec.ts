@@ -68,6 +68,7 @@ export const checkForDeviceError = (type: number, payload: Uint8Array): void => 
 // --- Decode functions ---
 
 /** Minimum payload size for GET_INFO response (without device name). */
+// TODO(vscope): C GET_INFO layout is channel_count..name_len..endianness (no protocolVersion).
 const INFO_HEADER_SIZE = 10;
 
 /**
@@ -79,6 +80,8 @@ export const decodeInfoResponse = (payload: Uint8Array): DeviceInfo => {
     throw new Error(`InfoResponse too short: ${payload.length} < ${INFO_HEADER_SIZE}`);
   }
 
+  // TODO(vscope): offsets assume protocolVersion at byte 0 and little-endian fields.
+  // C firmware sends native-endian values + an endianness byte; update decode accordingly.
   const protocolVersion = readU8(payload, 0);
   const numChannels = readU8(payload, 1);
   const bufferSize = readU16LE(payload, 2);
@@ -190,6 +193,7 @@ export const decodeChannelLabelsResponse = (
   payload: Uint8Array,
   info: DeviceInfo
 ): ChannelLabelsResponse => {
+  // TODO(vscope): C response includes {total,start,count}+count labels, not a fixed full array.
   const expected = info.numChannels * info.nameLen;
   if (payload.length !== expected) {
     throw new Error(`ChannelLabelsResponse wrong size: ${payload.length} vs expected ${expected}`);
@@ -210,6 +214,7 @@ export const decodeVarListResponse = (payload: Uint8Array, info: DeviceInfo): Va
   const startIdx = readU8(payload, 1);
   const count = readU8(payload, 2);
 
+  // TODO(vscope): C response entries are name-only (no id). Update sizing + decode.
   const entrySize = 1 + info.nameLen; // id + name
   const expectedDataLen = count * entrySize;
   if (payload.length !== 3 + expectedDataLen) {
@@ -237,6 +242,7 @@ export const decodeRtLabelsResponse = (payload: Uint8Array, info: DeviceInfo): R
   const startIdx = readU8(payload, 1);
   const count = readU8(payload, 2);
 
+  // TODO(vscope): C response entries are name-only (no id). Update sizing + decode.
   const entrySize = 1 + info.nameLen;
   const expectedDataLen = count * entrySize;
   if (payload.length !== 3 + expectedDataLen) {
@@ -417,6 +423,7 @@ export const encodeGetSnapshotDataRequest = (startSample: number, sampleCount: n
 
 /** Encode GET_VAR_LIST request. */
 export const encodeGetVarListRequest = (startIdx?: number, maxCount?: number): Uint8Array => {
+  // TODO(vscope): C requires start/max payload; empty request returns BAD_LEN.
   if (startIdx === undefined && maxCount === undefined) {
     return new Uint8Array([MessageType.GET_VAR_LIST]);
   }
@@ -446,11 +453,13 @@ export const encodeSetChannelMapRequest = (
 
 /** Encode GET_CHANNEL_LABELS request. */
 export const encodeGetChannelLabelsRequest = (): Uint8Array => {
+  // TODO(vscope): C requires start/max payload; empty request returns BAD_LEN.
   return new Uint8Array([MessageType.GET_CHANNEL_LABELS]);
 };
 
 /** Encode GET_RT_LABELS request. */
 export const encodeGetRtLabelsRequest = (startIdx?: number, maxCount?: number): Uint8Array => {
+  // TODO(vscope): C requires start/max payload; empty request returns BAD_LEN.
   if (startIdx === undefined && maxCount === undefined) {
     return new Uint8Array([MessageType.GET_RT_LABELS]);
   }
