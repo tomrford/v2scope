@@ -1,11 +1,10 @@
+import type { Endianness } from "./types";
+
 /**
  * Runtime device metadata populated from GET_INFO response.
  * Used to validate subsequent variable-length messages.
  */
 export interface DeviceInfo {
-  /** Protocol version (currently 1). */
-  // TODO(vscope): C GET_INFO has no protocol_version; replace with endianness + layout update.
-  protocolVersion: number;
   /** Number of recording channels (typically 5). */
   numChannels: number;
   /** Buffer size in samples. */
@@ -20,7 +19,8 @@ export interface DeviceInfo {
   rtBufferLen: number;
   /** Device name length (typically 16). */
   nameLen: number;
-  // TODO(vscope): C GET_INFO includes an endianness byte; add to DeviceInfo and decode.
+  /** Device endianness (0 little, 1 big). */
+  endianness: Endianness;
   /** Device name string. */
   deviceName: string;
 }

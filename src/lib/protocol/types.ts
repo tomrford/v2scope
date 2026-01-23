@@ -48,3 +48,9 @@ export enum ErrorCode {
   RANGE = 0x04,
   NOT_READY = 0x05,
 }
+
+/** Endianness values reported by GET_INFO. */
+export enum Endianness {
+  Little = 0,
+  Big = 1,
+}

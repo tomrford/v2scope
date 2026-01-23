@@ -80,10 +80,12 @@ export interface DeviceServiceShape {
     handle: DeviceHandle
   ) => Effect.Effect<DeviceInfo, DeviceError>;
   readonly getTiming: (
-    handle: DeviceHandle
+    handle: DeviceHandle,
+    info: DeviceInfo
   ) => Effect.Effect<TimingResponse, DeviceError>;
   readonly setTiming: (
     handle: DeviceHandle,
+    info: DeviceInfo,
     divider: number,
     preTrig: number
   ) => Effect.Effect<void, DeviceError>;
@@ -110,34 +112,40 @@ export interface DeviceServiceShape {
   ) => Effect.Effect<SetChannelMapResponse, DeviceError>;
   readonly getChannelLabels: (
     handle: DeviceHandle,
-    info: DeviceInfo
+    info: DeviceInfo,
+    start: number,
+    max: number
   ) => Effect.Effect<ChannelLabelsResponse, DeviceError>;
   readonly getVarList: (
     handle: DeviceHandle,
     info: DeviceInfo,
-    start?: number,
-    max?: number
+    start: number,
+    max: number
   ) => Effect.Effect<VarListResponse, DeviceError>;
   readonly getRtLabels: (
     handle: DeviceHandle,
     info: DeviceInfo,
-    start?: number,
-    max?: number
+    start: number,
+    max: number
   ) => Effect.Effect<RtLabelsResponse, DeviceError>;
   readonly getRtBuffer: (
     handle: DeviceHandle,
+    info: DeviceInfo,
     index: number
   ) => Effect.Effect<RtBufferResponse, DeviceError>;
   readonly setRtBuffer: (
     handle: DeviceHandle,
+    info: DeviceInfo,
     index: number,
     value: number
   ) => Effect.Effect<void, DeviceError>;
   readonly getTrigger: (
-    handle: DeviceHandle
+    handle: DeviceHandle,
+    info: DeviceInfo
   ) => Effect.Effect<TriggerResponse, DeviceError>;
   readonly setTrigger: (
     handle: DeviceHandle,
+    info: DeviceInfo,
     threshold: number,
     channel: number,
     mode: TriggerMode
@@ -210,13 +218,15 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
   getInfo: (handle) =>
     makeProtocolRequest(handle, encodeGetInfoRequest, decodeInfoResponse),
 
-  getTiming: (handle) =>
-    makeProtocolRequest(handle, encodeGetTimingRequest, decodeTimingResponse),
+  getTiming: (handle, info) =>
+    makeProtocolRequest(handle, encodeGetTimingRequest, (payload) =>
+      decodeTimingResponse(payload, info)
+    ),
 
-  setTiming: (handle, divider, preTrig) =>
+  setTiming: (handle, info, divider, preTrig) =>
     makeProtocolRequest(
       handle,
-      () => encodeSetTimingRequest(divider, preTrig),
+      () => encodeSetTimingRequest(divider, preTrig, info.endianness),
       () => undefined
     ),
 
@@ -250,9 +260,11 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
       decodeSetChannelMapResponse
     ),
 
-  getChannelLabels: (handle, info) =>
-    makeProtocolRequest(handle, encodeGetChannelLabelsRequest, (payload) =>
-      decodeChannelLabelsResponse(payload, info)
+  getChannelLabels: (handle, info, start, max) =>
+    makeProtocolRequest(
+      handle,
+      () => encodeGetChannelLabelsRequest(start, max),
+      (payload) => decodeChannelLabelsResponse(payload, info)
     ),
 
   getVarList: (handle, info, start, max) =>
@@ -269,31 +281,31 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
       (payload) => decodeRtLabelsResponse(payload, info)
     ),
 
-  getRtBuffer: (handle, index) =>
+  getRtBuffer: (handle, info, index) =>
     makeProtocolRequest(
       handle,
       () => encodeGetRtBufferRequest(index),
-      decodeRtBufferResponse
+      (payload) => decodeRtBufferResponse(payload, info)
     ),
 
-  setRtBuffer: (handle, index, value) =>
+  setRtBuffer: (handle, info, index, value) =>
     makeProtocolRequest(
       handle,
-      () => encodeSetRtBufferRequest(index, value),
+      () => encodeSetRtBufferRequest(index, value, info.endianness),
       () => undefined
     ),
 
-  getTrigger: (handle) =>
+  getTrigger: (handle, info) =>
     makeProtocolRequest(
       handle,
       encodeGetTriggerRequest,
-      decodeTriggerParamsResponse
+      (payload) => decodeTriggerParamsResponse(payload, info)
     ),
 
-  setTrigger: (handle, threshold, channel, mode) =>
+  setTrigger: (handle, info, threshold, channel, mode) =>
     makeProtocolRequest(
       handle,
-      () => encodeSetTriggerRequest(threshold, channel, mode),
+      () => encodeSetTriggerRequest(threshold, channel, mode, info.endianness),
       () => undefined
     ),
 
@@ -305,7 +317,7 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
   getSnapshotData: (handle, info, start, count) =>
     makeProtocolRequest(
       handle,
-      () => encodeGetSnapshotDataRequest(start, count),
+      () => encodeGetSnapshotDataRequest(start, count, info.endianness),
       (payload) => decodeSnapshotDataResponse(payload, info, count)
     ),
 });

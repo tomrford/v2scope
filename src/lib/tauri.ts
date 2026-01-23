@@ -21,7 +21,6 @@ export const openDevice = (
   path: string,
   config: SerialConfig
 ): Effect.Effect<number, SerialError> =>
-  // TODO(vscope): Rust expects serialport enum encoding for dataBits/parity/stopBits.
   invoke<number>("open_device", { path, config });
 
 export const closeDevice = (

@@ -35,13 +35,12 @@ import {
   encodeGetTriggerRequest,
   encodeSetTriggerRequest,
 } from "./codec";
-import { MessageType, State, TriggerMode, ErrorCode } from "./types";
+import { Endianness, MessageType, State, TriggerMode, ErrorCode } from "./types";
 import type { DeviceInfo } from "./device-info";
-import { writeU32LE, writeF32LE, writeU16LE } from "./bytes";
+import { writeU32LE, writeF32LE } from "./bytes";
 
 // Test fixture: typical device info
 const testDeviceInfo: DeviceInfo = {
-  protocolVersion: 1,
   numChannels: 5,
   bufferSize: 1000,
   isrKhz: 10,
@@ -49,6 +48,7 @@ const testDeviceInfo: DeviceInfo = {
   rtCount: 4,
   rtBufferLen: 16,
   nameLen: 16,
+  endianness: Endianness.Little,
   deviceName: "TestDevice",
 };
 
@@ -85,22 +85,21 @@ describe("decodeInfoResponse", () => {
     // Build a valid GET_INFO response payload
     const nameLen = 16;
     const payload = new Uint8Array(10 + nameLen);
-    payload[0] = 1; // protocol version
-    payload[1] = 5; // channels
-    payload[2] = 0xe8; // buffer_size = 1000 (LE)
-    payload[3] = 0x03;
-    payload[4] = 0x0a; // isr_khz = 10 (LE)
-    payload[5] = 0x00;
-    payload[6] = 8; // var_count
-    payload[7] = 4; // rt_count
-    payload[8] = 16; // rt_buffer_len
-    payload[9] = 16; // name_len
+    payload[0] = 5; // channels
+    payload[1] = 0xe8; // buffer_size = 1000 (LE)
+    payload[2] = 0x03;
+    payload[3] = 0x0a; // isr_khz = 10 (LE)
+    payload[4] = 0x00;
+    payload[5] = 8; // var_count
+    payload[6] = 4; // rt_count
+    payload[7] = 16; // rt_buffer_len
+    payload[8] = 16; // name_len
+    payload[9] = Endianness.Little; // endianness
     // Device name "TestDev"
     const name = new TextEncoder().encode("TestDev");
     payload.set(name, 10);
 
     const info = decodeInfoResponse(payload);
-    expect(info.protocolVersion).toBe(1);
     expect(info.numChannels).toBe(5);
     expect(info.bufferSize).toBe(1000);
     expect(info.isrKhz).toBe(10);
@@ -108,7 +107,30 @@ describe("decodeInfoResponse", () => {
     expect(info.rtCount).toBe(4);
     expect(info.rtBufferLen).toBe(16);
     expect(info.nameLen).toBe(16);
+    expect(info.endianness).toBe(Endianness.Little);
     expect(info.deviceName).toBe("TestDev");
+  });
+
+  it("decodes big-endian response fields", () => {
+    const nameLen = 4;
+    const payload = new Uint8Array(10 + nameLen);
+    payload[0] = 2; // channels
+    payload[1] = 0x12; // buffer_size = 0x1234 (BE)
+    payload[2] = 0x34;
+    payload[3] = 0x00; // isr_khz = 100 (BE)
+    payload[4] = 0x64;
+    payload[5] = 1; // var_count
+    payload[6] = 1; // rt_count
+    payload[7] = 16; // rt_buffer_len
+    payload[8] = nameLen;
+    payload[9] = Endianness.Big;
+    payload.set(new TextEncoder().encode("BE"), 10);
+
+    const info = decodeInfoResponse(payload);
+    expect(info.endianness).toBe(Endianness.Big);
+    expect(info.bufferSize).toBe(0x1234);
+    expect(info.isrKhz).toBe(100);
+    expect(info.deviceName).toBe("BE");
   });
 
   it("throws on too short payload", () => {
@@ -117,7 +139,8 @@ describe("decodeInfoResponse", () => {
 
   it("throws when device name missing", () => {
     const payload = new Uint8Array(10);
-    payload[9] = 16; // name_len = 16, but no name data
+    payload[8] = 16; // name_len = 16, but no name data
+    payload[9] = Endianness.Little;
     expect(() => decodeInfoResponse(payload)).toThrow("missing device name");
   });
 });
@@ -127,13 +150,13 @@ describe("decodeTimingResponse", () => {
     const payload = new Uint8Array(8);
     writeU32LE(payload, 0, 100); // divider
     writeU32LE(payload, 4, 500); // preTrig
-    const result = decodeTimingResponse(payload);
+    const result = decodeTimingResponse(payload, testDeviceInfo);
     expect(result.divider).toBe(100);
     expect(result.preTrig).toBe(500);
   });
 
   it("throws on too short", () => {
-    expect(() => decodeTimingResponse(new Uint8Array(4))).toThrow("too short");
+    expect(() => decodeTimingResponse(new Uint8Array(4), testDeviceInfo)).toThrow("too short");
   });
 });
 
@@ -214,14 +237,20 @@ describe("decodeSetChannelMapResponse", () => {
 
 describe("decodeChannelLabelsResponse", () => {
   it("decodes channel labels", () => {
-    const payload = new Uint8Array(testDeviceInfo.numChannels * testDeviceInfo.nameLen);
+    const count = testDeviceInfo.numChannels;
+    const payload = new Uint8Array(3 + count * testDeviceInfo.nameLen);
+    payload[0] = testDeviceInfo.numChannels; // totalCount
+    payload[1] = 0; // startIdx
+    payload[2] = count; // count
     const labels = ["CH0", "CH1", "CH2", "CH3", "CH4"];
     labels.forEach((label, i) => {
       const encoded = new TextEncoder().encode(label);
-      payload.set(encoded, i * testDeviceInfo.nameLen);
+      payload.set(encoded, 3 + i * testDeviceInfo.nameLen);
     });
 
     const result = decodeChannelLabelsResponse(payload, testDeviceInfo);
+    expect(result.totalCount).toBe(5);
+    expect(result.startIdx).toBe(0);
     expect(result.labels).toEqual(labels);
   });
 
@@ -235,29 +264,27 @@ describe("decodeChannelLabelsResponse", () => {
 describe("decodeVarListResponse", () => {
   it("decodes variable list", () => {
     // Header: totalCount=8, startIdx=0, count=2
-    // Entries: [id=0, name], [id=1, name]
-    const entrySize = 1 + testDeviceInfo.nameLen;
+    // Entries: [name], [name]
+    const entrySize = testDeviceInfo.nameLen;
     const payload = new Uint8Array(3 + 2 * entrySize);
     payload[0] = 8; // totalCount
     payload[1] = 0; // startIdx
     payload[2] = 2; // count
 
     // Entry 0
-    payload[3] = 0;
     const name0 = new TextEncoder().encode("Var0");
-    payload.set(name0, 4);
+    payload.set(name0, 3);
 
     // Entry 1
-    payload[3 + entrySize] = 1;
     const name1 = new TextEncoder().encode("Var1");
-    payload.set(name1, 4 + entrySize);
+    payload.set(name1, 3 + entrySize);
 
     const result = decodeVarListResponse(payload, testDeviceInfo);
     expect(result.totalCount).toBe(8);
     expect(result.startIdx).toBe(0);
     expect(result.entries).toHaveLength(2);
-    expect(result.entries[0]).toEqual({ id: 0, name: "Var0" });
-    expect(result.entries[1]).toEqual({ id: 1, name: "Var1" });
+    expect(result.entries[0]).toBe("Var0");
+    expect(result.entries[1]).toBe("Var1");
   });
 
   it("throws on too short header", () => {
@@ -269,12 +296,12 @@ describe("decodeRtBufferResponse", () => {
   it("decodes RT buffer value", () => {
     const payload = new Uint8Array(4);
     writeF32LE(payload, 0, 42.5);
-    const result = decodeRtBufferResponse(payload);
+    const result = decodeRtBufferResponse(payload, testDeviceInfo);
     expect(result.value).toBe(42.5);
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeRtBufferResponse(new Uint8Array(3))).toThrow("wrong size");
+    expect(() => decodeRtBufferResponse(new Uint8Array(3), testDeviceInfo)).toThrow("wrong size");
   });
 });
 
@@ -285,14 +312,16 @@ describe("decodeTriggerParamsResponse", () => {
     payload[4] = 2; // channel
     payload[5] = TriggerMode.RISING; // mode
 
-    const result = decodeTriggerParamsResponse(payload);
+    const result = decodeTriggerParamsResponse(payload, testDeviceInfo);
     expect(result.threshold).toBe(1.5);
     expect(result.channel).toBe(2);
     expect(result.mode).toBe(TriggerMode.RISING);
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeTriggerParamsResponse(new Uint8Array(4))).toThrow("wrong size");
+    expect(() => decodeTriggerParamsResponse(new Uint8Array(4), testDeviceInfo)).toThrow(
+      "wrong size"
+    );
   });
 });
 
@@ -387,7 +416,7 @@ describe("encodeGetTimingRequest", () => {
 
 describe("encodeSetTimingRequest", () => {
   it("encodes divider and preTrig", () => {
-    const result = encodeSetTimingRequest(100, 500);
+    const result = encodeSetTimingRequest(100, 500, Endianness.Little);
     expect(result[0]).toBe(MessageType.SET_TIMING);
     expect(result.length).toBe(9);
 
@@ -395,6 +424,13 @@ describe("encodeSetTimingRequest", () => {
     const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
     expect(view.getUint32(1, true)).toBe(100);
     expect(view.getUint32(5, true)).toBe(500);
+  });
+
+  it("encodes big-endian values when requested", () => {
+    const result = encodeSetTimingRequest(0x12345678, 0x0a0b0c0d, Endianness.Big);
+    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    expect(view.getUint32(1, false)).toBe(0x12345678);
+    expect(view.getUint32(5, false)).toBe(0x0a0b0c0d);
   });
 });
 
@@ -435,7 +471,7 @@ describe("encodeGetSnapshotHeaderRequest", () => {
 
 describe("encodeGetSnapshotDataRequest", () => {
   it("encodes start sample and count", () => {
-    const result = encodeGetSnapshotDataRequest(100, 10);
+    const result = encodeGetSnapshotDataRequest(100, 10, Endianness.Little);
     expect(result[0]).toBe(MessageType.GET_SNAPSHOT_DATA);
     expect(result.length).toBe(4);
 
@@ -446,11 +482,6 @@ describe("encodeGetSnapshotDataRequest", () => {
 });
 
 describe("encodeGetVarListRequest", () => {
-  it("returns TYPE only when no params", () => {
-    const result = encodeGetVarListRequest();
-    expect(result).toEqual(new Uint8Array([MessageType.GET_VAR_LIST]));
-  });
-
   it("encodes pagination params", () => {
     const result = encodeGetVarListRequest(5, 10);
     expect(result[0]).toBe(MessageType.GET_VAR_LIST);
@@ -477,18 +508,15 @@ describe("encodeSetChannelMapRequest", () => {
 });
 
 describe("encodeGetChannelLabelsRequest", () => {
-  it("returns TYPE byte only", () => {
-    const result = encodeGetChannelLabelsRequest();
-    expect(result).toEqual(new Uint8Array([MessageType.GET_CHANNEL_LABELS]));
+  it("encodes pagination params", () => {
+    const result = encodeGetChannelLabelsRequest(0, 5);
+    expect(result[0]).toBe(MessageType.GET_CHANNEL_LABELS);
+    expect(result[1]).toBe(0);
+    expect(result[2]).toBe(5);
   });
 });
 
 describe("encodeGetRtLabelsRequest", () => {
-  it("returns TYPE only when no params", () => {
-    const result = encodeGetRtLabelsRequest();
-    expect(result).toEqual(new Uint8Array([MessageType.GET_RT_LABELS]));
-  });
-
   it("encodes pagination params", () => {
     const result = encodeGetRtLabelsRequest(2, 8);
     expect(result[0]).toBe(MessageType.GET_RT_LABELS);
@@ -506,7 +534,7 @@ describe("encodeGetRtBufferRequest", () => {
 
 describe("encodeSetRtBufferRequest", () => {
   it("encodes index and value", () => {
-    const result = encodeSetRtBufferRequest(3, 42.5);
+    const result = encodeSetRtBufferRequest(3, 42.5, Endianness.Little);
     expect(result[0]).toBe(MessageType.SET_RT_BUFFER);
     expect(result[1]).toBe(3);
     expect(result.length).toBe(6);
@@ -526,7 +554,7 @@ describe("encodeGetTriggerRequest", () => {
 
 describe("encodeSetTriggerRequest", () => {
   it("encodes threshold, channel, and mode", () => {
-    const result = encodeSetTriggerRequest(1.5, 2, TriggerMode.BOTH);
+    const result = encodeSetTriggerRequest(1.5, 2, TriggerMode.BOTH, Endianness.Little);
     expect(result[0]).toBe(MessageType.SET_TRIGGER);
     expect(result.length).toBe(7);
 
