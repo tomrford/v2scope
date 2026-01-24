@@ -1,72 +1,100 @@
+import * as r from "restructure";
+
 /**
  * Pure functions for byte manipulation with selectable endianness.
- * No dependencies - works with standard Uint8Array.
+ * Backed by restructure primitives for consistent packing/unpacking.
  */
+
+const sliceBytes = (
+  data: Uint8Array,
+  offset: number,
+  size: number,
+  label: string,
+): Uint8Array => {
+  if (offset + size > data.length) {
+    throw new RangeError(`${label}: offset ${offset} out of bounds`);
+  }
+  return data.subarray(offset, offset + size);
+};
+
+const writeBytes = (
+  buf: Uint8Array,
+  offset: number,
+  data: Uint8Array,
+  label: string,
+): void => {
+  if (offset + data.length > buf.length) {
+    throw new RangeError(`${label}: offset ${offset} out of bounds`);
+  }
+  buf.set(data, offset);
+};
 
 // --- Read functions (from buffer at offset) ---
 
 export const readU8 = (data: Uint8Array, offset: number): number => {
-  if (offset >= data.length) throw new RangeError(`readU8: offset ${offset} out of bounds`);
-  return data[offset];
+  return r.uint8.fromBuffer(sliceBytes(data, offset, 1, "readU8"));
 };
 
 export const readU16LE = (data: Uint8Array, offset: number): number => {
-  if (offset + 2 > data.length) throw new RangeError(`readU16LE: offset ${offset} out of bounds`);
-  return data[offset] | (data[offset + 1] << 8);
+  return r.uint16le.fromBuffer(sliceBytes(data, offset, 2, "readU16LE"));
 };
 
 export const readU32LE = (data: Uint8Array, offset: number): number => {
-  if (offset + 4 > data.length) throw new RangeError(`readU32LE: offset ${offset} out of bounds`);
-  // Use >>> 0 on entire result to force unsigned interpretation
-  return (
-    (data[offset] |
-      (data[offset + 1] << 8) |
-      (data[offset + 2] << 16) |
-      (data[offset + 3] << 24)) >>>
-    0
-  );
+  return r.uint32le.fromBuffer(sliceBytes(data, offset, 4, "readU32LE"));
 };
 
-export const readU16 = (data: Uint8Array, offset: number, littleEndian: boolean): number => {
-  if (offset + 2 > data.length) throw new RangeError(`readU16: offset ${offset} out of bounds`);
+const readU16BE = (data: Uint8Array, offset: number): number => {
+  return r.uint16be.fromBuffer(sliceBytes(data, offset, 2, "readU16BE"));
+};
+
+const readU32BE = (data: Uint8Array, offset: number): number => {
+  return r.uint32be.fromBuffer(sliceBytes(data, offset, 4, "readU32BE"));
+};
+
+export const readU16 = (
+  data: Uint8Array,
+  offset: number,
+  littleEndian: boolean,
+): number => {
   if (littleEndian) {
     return readU16LE(data, offset);
   }
-  return (data[offset] << 8) | data[offset + 1];
+  return readU16BE(data, offset);
 };
 
-export const readU32 = (data: Uint8Array, offset: number, littleEndian: boolean): number => {
-  if (offset + 4 > data.length) throw new RangeError(`readU32: offset ${offset} out of bounds`);
+export const readU32 = (
+  data: Uint8Array,
+  offset: number,
+  littleEndian: boolean,
+): number => {
   if (littleEndian) {
     return readU32LE(data, offset);
   }
-  return (
-    ((data[offset] << 24) |
-      (data[offset + 1] << 16) |
-      (data[offset + 2] << 8) |
-      data[offset + 3]) >>>
-    0
-  );
+  return readU32BE(data, offset);
 };
 
-// Float view for reading/writing IEEE 754 floats
-const floatView = new DataView(new ArrayBuffer(4));
-
-export const readF32 = (data: Uint8Array, offset: number, littleEndian: boolean): number => {
-  if (offset + 4 > data.length) throw new RangeError(`readF32: offset ${offset} out of bounds`);
-  floatView.setUint8(0, data[offset]);
-  floatView.setUint8(1, data[offset + 1]);
-  floatView.setUint8(2, data[offset + 2]);
-  floatView.setUint8(3, data[offset + 3]);
-  return floatView.getFloat32(0, littleEndian);
+export const readF32 = (
+  data: Uint8Array,
+  offset: number,
+  littleEndian: boolean,
+): number => {
+  return littleEndian
+    ? r.floatle.fromBuffer(sliceBytes(data, offset, 4, "readF32"))
+    : r.floatbe.fromBuffer(sliceBytes(data, offset, 4, "readF32"));
 };
 
 export const readF32LE = (data: Uint8Array, offset: number): number =>
   readF32(data, offset, true);
 
-export const readStringFixed = (data: Uint8Array, offset: number, len: number): string => {
+export const readStringFixed = (
+  data: Uint8Array,
+  offset: number,
+  len: number,
+): string => {
   if (offset + len > data.length) {
-    throw new RangeError(`readStringFixed: offset ${offset} + len ${len} out of bounds`);
+    throw new RangeError(
+      `readStringFixed: offset ${offset} + len ${len} out of bounds`,
+    );
   }
   // Find null terminator or use full length
   let end = offset;
@@ -78,68 +106,84 @@ export const readStringFixed = (data: Uint8Array, offset: number, len: number): 
 
 // --- Write functions (mutate buffer at offset) ---
 
-export const writeU8 = (buf: Uint8Array, offset: number, value: number): void => {
-  if (offset >= buf.length) throw new RangeError(`writeU8: offset ${offset} out of bounds`);
-  buf[offset] = value & 0xff;
+export const writeU8 = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+): void => {
+  writeBytes(buf, offset, r.uint8.toBuffer(value & 0xff), "writeU8");
 };
 
-export const writeU16LE = (buf: Uint8Array, offset: number, value: number): void => {
-  if (offset + 2 > buf.length) throw new RangeError(`writeU16LE: offset ${offset} out of bounds`);
-  buf[offset] = value & 0xff;
-  buf[offset + 1] = (value >> 8) & 0xff;
+export const writeU16LE = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+): void => {
+  writeBytes(buf, offset, r.uint16le.toBuffer(value & 0xffff), "writeU16LE");
 };
 
-export const writeU32LE = (buf: Uint8Array, offset: number, value: number): void => {
-  if (offset + 4 > buf.length) throw new RangeError(`writeU32LE: offset ${offset} out of bounds`);
-  buf[offset] = value & 0xff;
-  buf[offset + 1] = (value >> 8) & 0xff;
-  buf[offset + 2] = (value >> 16) & 0xff;
-  buf[offset + 3] = (value >>> 24) & 0xff;
+export const writeU32LE = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+): void => {
+  writeBytes(buf, offset, r.uint32le.toBuffer(value >>> 0), "writeU32LE");
 };
 
-export const writeU16 = (buf: Uint8Array, offset: number, value: number, littleEndian: boolean): void => {
-  if (offset + 2 > buf.length) throw new RangeError(`writeU16: offset ${offset} out of bounds`);
+export const writeU16 = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+  littleEndian: boolean,
+): void => {
   if (littleEndian) {
-    buf[offset] = value & 0xff;
-    buf[offset + 1] = (value >> 8) & 0xff;
+    writeU16LE(buf, offset, value);
     return;
   }
-  buf[offset] = (value >> 8) & 0xff;
-  buf[offset + 1] = value & 0xff;
+  writeBytes(buf, offset, r.uint16be.toBuffer(value & 0xffff), "writeU16");
 };
 
-export const writeU32 = (buf: Uint8Array, offset: number, value: number, littleEndian: boolean): void => {
-  if (offset + 4 > buf.length) throw new RangeError(`writeU32: offset ${offset} out of bounds`);
+export const writeU32 = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+  littleEndian: boolean,
+): void => {
   if (littleEndian) {
     writeU32LE(buf, offset, value);
     return;
   }
-  buf[offset] = (value >>> 24) & 0xff;
-  buf[offset + 1] = (value >>> 16) & 0xff;
-  buf[offset + 2] = (value >>> 8) & 0xff;
-  buf[offset + 3] = value & 0xff;
+  writeBytes(buf, offset, r.uint32be.toBuffer(value >>> 0), "writeU32");
 };
 
-export const writeF32 = (buf: Uint8Array, offset: number, value: number, littleEndian: boolean): void => {
-  if (offset + 4 > buf.length) throw new RangeError(`writeF32: offset ${offset} out of bounds`);
-  floatView.setFloat32(0, value, littleEndian);
-  buf[offset] = floatView.getUint8(0);
-  buf[offset + 1] = floatView.getUint8(1);
-  buf[offset + 2] = floatView.getUint8(2);
-  buf[offset + 3] = floatView.getUint8(3);
+export const writeF32 = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+  littleEndian: boolean,
+): void => {
+  const encoded = littleEndian
+    ? r.floatle.toBuffer(value)
+    : r.floatbe.toBuffer(value);
+  writeBytes(buf, offset, encoded, "writeF32");
 };
 
-export const writeF32LE = (buf: Uint8Array, offset: number, value: number): void =>
-  writeF32(buf, offset, value, true);
+export const writeF32LE = (
+  buf: Uint8Array,
+  offset: number,
+  value: number,
+): void => writeF32(buf, offset, value, true);
 
 export const writeStringFixed = (
   buf: Uint8Array,
   offset: number,
   value: string,
-  len: number
+  len: number,
 ): void => {
   if (offset + len > buf.length) {
-    throw new RangeError(`writeStringFixed: offset ${offset} + len ${len} out of bounds`);
+    throw new RangeError(
+      `writeStringFixed: offset ${offset} + len ${len} out of bounds`,
+    );
   }
   const encoded = new TextEncoder().encode(value);
   const copyLen = Math.min(encoded.length, len);

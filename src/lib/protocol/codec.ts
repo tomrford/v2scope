@@ -15,8 +15,8 @@ import {
   writeU32,
   writeF32,
 } from "./bytes";
-import type { DeviceInfo } from "./device-info";
 import {
+  DeviceInfoSchema,
   TimingResponseSchema,
   StateResponseSchema,
   FrameResponseSchema,
@@ -28,6 +28,7 @@ import {
   TriggerResponseSchema,
   SnapshotHeaderResponseSchema,
   SnapshotDataResponseSchema,
+  type DeviceInfo,
   type TimingResponse,
   type StateResponse,
   type FrameResponse,
@@ -40,7 +41,13 @@ import {
   type SnapshotHeaderResponse,
   type SnapshotDataResponse,
 } from "./schemas";
-import { Endianness, MessageType, State, TriggerMode, ErrorCode } from "./types";
+import {
+  Endianness,
+  MessageType,
+  State,
+  TriggerMode,
+  ErrorCode,
+} from "./types";
 
 // --- Error handling ---
 
@@ -56,7 +63,10 @@ export class DeviceError extends Error {
  * Check if response is a device error. Call first on any response.
  * @throws DeviceError if type is 0xFF
  */
-export const checkForDeviceError = (type: number, payload: Uint8Array): void => {
+export const checkForDeviceError = (
+  type: number,
+  payload: Uint8Array,
+): void => {
   if (type === MessageType.ERROR) {
     if (payload.length < 1) {
       throw new Error("Malformed error response: missing error code");
@@ -79,13 +89,18 @@ const INFO_HEADER_SIZE = 10;
  */
 export const decodeInfoResponse = (payload: Uint8Array): DeviceInfo => {
   if (payload.length < INFO_HEADER_SIZE) {
-    throw new Error(`InfoResponse too short: ${payload.length} < ${INFO_HEADER_SIZE}`);
+    throw new Error(
+      `InfoResponse too short: ${payload.length} < ${INFO_HEADER_SIZE}`,
+    );
   }
 
   const numChannels = readU8(payload, 0);
   const nameLen = readU8(payload, 8);
   const endiannessValue = readU8(payload, 9);
-  if (endiannessValue !== Endianness.Little && endiannessValue !== Endianness.Big) {
+  if (
+    endiannessValue !== Endianness.Little &&
+    endiannessValue !== Endianness.Big
+  ) {
     throw new Error(`InfoResponse invalid endianness: ${endiannessValue}`);
   }
   const endianness = endiannessValue as Endianness;
@@ -98,13 +113,13 @@ export const decodeInfoResponse = (payload: Uint8Array): DeviceInfo => {
 
   if (payload.length < INFO_HEADER_SIZE + nameLen) {
     throw new Error(
-      `InfoResponse missing device name: ${payload.length} < ${INFO_HEADER_SIZE + nameLen}`
+      `InfoResponse missing device name: ${payload.length} < ${INFO_HEADER_SIZE + nameLen}`,
     );
   }
 
   const deviceName = readStringFixed(payload, INFO_HEADER_SIZE, nameLen);
 
-  return {
+  return DeviceInfoSchema.parse({
     numChannels,
     bufferSize,
     isrKhz,
@@ -114,11 +129,14 @@ export const decodeInfoResponse = (payload: Uint8Array): DeviceInfo => {
     nameLen,
     endianness,
     deviceName,
-  };
+  });
 };
 
 /** Decode GET_TIMING / SET_TIMING response. */
-export const decodeTimingResponse = (payload: Uint8Array, info: DeviceInfo): TimingResponse => {
+export const decodeTimingResponse = (
+  payload: Uint8Array,
+  info: DeviceInfo,
+): TimingResponse => {
   if (payload.length < 8) {
     throw new Error(`TimingResponse too short: ${payload.length} < 8`);
   }
@@ -143,15 +161,22 @@ export const decodeStateResponse = (payload: Uint8Array): StateResponse => {
 export const decodeTriggerResponse = (payload: Uint8Array): void => {
   // TRIGGER response has empty payload - just validate
   if (payload.length !== 0) {
-    throw new Error(`TriggerResponse should be empty, got ${payload.length} bytes`);
+    throw new Error(
+      `TriggerResponse should be empty, got ${payload.length} bytes`,
+    );
   }
 };
 
 /** Decode GET_FRAME response. Requires DeviceInfo for channel count. */
-export const decodeFrameResponse = (payload: Uint8Array, info: DeviceInfo): FrameResponse => {
+export const decodeFrameResponse = (
+  payload: Uint8Array,
+  info: DeviceInfo,
+): FrameResponse => {
   const expected = info.numChannels * 4;
   if (payload.length !== expected) {
-    throw new Error(`FrameResponse wrong size: ${payload.length} vs expected ${expected}`);
+    throw new Error(
+      `FrameResponse wrong size: ${payload.length} vs expected ${expected}`,
+    );
   }
   const littleEndian = isLittleEndian(info.endianness);
   const values: number[] = [];
@@ -164,11 +189,11 @@ export const decodeFrameResponse = (payload: Uint8Array, info: DeviceInfo): Fram
 /** Decode GET_CHANNEL_MAP response. Requires DeviceInfo. */
 export const decodeChannelMapResponse = (
   payload: Uint8Array,
-  info: DeviceInfo
+  info: DeviceInfo,
 ): ChannelMapResponse => {
   if (payload.length !== info.numChannels) {
     throw new Error(
-      `ChannelMapResponse wrong size: ${payload.length} vs expected ${info.numChannels}`
+      `ChannelMapResponse wrong size: ${payload.length} vs expected ${info.numChannels}`,
     );
   }
   const varIds: number[] = [];
@@ -187,7 +212,7 @@ export interface SetChannelMapResponse {
 const decodeNameListResponse = (
   payload: Uint8Array,
   nameLen: number,
-  label: string
+  label: string,
 ): { totalCount: number; startIdx: number; names: string[] } => {
   if (payload.length < 3) {
     throw new Error(`${label} too short: ${payload.length} < 3`);
@@ -198,7 +223,9 @@ const decodeNameListResponse = (
 
   const expectedDataLen = count * nameLen;
   if (payload.length !== 3 + expectedDataLen) {
-    throw new Error(`${label} wrong size: ${payload.length} vs expected ${3 + expectedDataLen}`);
+    throw new Error(
+      `${label} wrong size: ${payload.length} vs expected ${3 + expectedDataLen}`,
+    );
   }
 
   const names: string[] = [];
@@ -211,9 +238,13 @@ const decodeNameListResponse = (
 };
 
 /** Decode SET_CHANNEL_MAP response. Returns the echoed channel mapping. */
-export const decodeSetChannelMapResponse = (payload: Uint8Array): SetChannelMapResponse => {
+export const decodeSetChannelMapResponse = (
+  payload: Uint8Array,
+): SetChannelMapResponse => {
   if (payload.length !== 2) {
-    throw new Error(`SetChannelMapResponse wrong size: ${payload.length} vs expected 2`);
+    throw new Error(
+      `SetChannelMapResponse wrong size: ${payload.length} vs expected 2`,
+    );
   }
   return {
     channelIdx: readU8(payload, 0),
@@ -224,40 +255,55 @@ export const decodeSetChannelMapResponse = (payload: Uint8Array): SetChannelMapR
 /** Decode GET_CHANNEL_LABELS response. Requires DeviceInfo. */
 export const decodeChannelLabelsResponse = (
   payload: Uint8Array,
-  info: DeviceInfo
+  info: DeviceInfo,
 ): ChannelLabelsResponse => {
   const { totalCount, startIdx, names } = decodeNameListResponse(
     payload,
     info.nameLen,
-    "ChannelLabelsResponse"
+    "ChannelLabelsResponse",
   );
-  return ChannelLabelsResponseSchema.parse({ totalCount, startIdx, labels: names });
+  return ChannelLabelsResponseSchema.parse({
+    totalCount,
+    startIdx,
+    labels: names,
+  });
 };
 
 /** Decode GET_VAR_LIST response. Requires DeviceInfo for name length. */
-export const decodeVarListResponse = (payload: Uint8Array, info: DeviceInfo): VarListResponse => {
+export const decodeVarListResponse = (
+  payload: Uint8Array,
+  info: DeviceInfo,
+): VarListResponse => {
   const { totalCount, startIdx, names } = decodeNameListResponse(
     payload,
     info.nameLen,
-    "VarListResponse"
+    "VarListResponse",
   );
   return VarListResponseSchema.parse({ totalCount, startIdx, entries: names });
 };
 
 /** Decode GET_RT_LABELS response. Requires DeviceInfo for name length. */
-export const decodeRtLabelsResponse = (payload: Uint8Array, info: DeviceInfo): RtLabelsResponse => {
+export const decodeRtLabelsResponse = (
+  payload: Uint8Array,
+  info: DeviceInfo,
+): RtLabelsResponse => {
   const { totalCount, startIdx, names } = decodeNameListResponse(
     payload,
     info.nameLen,
-    "RtLabelsResponse"
+    "RtLabelsResponse",
   );
   return RtLabelsResponseSchema.parse({ totalCount, startIdx, entries: names });
 };
 
 /** Decode GET_RT_BUFFER / SET_RT_BUFFER response. */
-export const decodeRtBufferResponse = (payload: Uint8Array, info: DeviceInfo): RtBufferResponse => {
+export const decodeRtBufferResponse = (
+  payload: Uint8Array,
+  info: DeviceInfo,
+): RtBufferResponse => {
   if (payload.length !== 4) {
-    throw new Error(`RtBufferResponse wrong size: ${payload.length} vs expected 4`);
+    throw new Error(
+      `RtBufferResponse wrong size: ${payload.length} vs expected 4`,
+    );
   }
   const littleEndian = isLittleEndian(info.endianness);
   return RtBufferResponseSchema.parse({
@@ -268,10 +314,12 @@ export const decodeRtBufferResponse = (payload: Uint8Array, info: DeviceInfo): R
 /** Decode GET_TRIGGER / SET_TRIGGER response. */
 export const decodeTriggerParamsResponse = (
   payload: Uint8Array,
-  info: DeviceInfo
+  info: DeviceInfo,
 ): TriggerResponse => {
   if (payload.length !== 6) {
-    throw new Error(`TriggerResponse wrong size: ${payload.length} vs expected 6`);
+    throw new Error(
+      `TriggerResponse wrong size: ${payload.length} vs expected 6`,
+    );
   }
   const littleEndian = isLittleEndian(info.endianness);
   return TriggerResponseSchema.parse({
@@ -284,7 +332,7 @@ export const decodeTriggerParamsResponse = (
 /** Decode GET_SNAPSHOT_HEADER response. Requires DeviceInfo. */
 export const decodeSnapshotHeaderResponse = (
   payload: Uint8Array,
-  info: DeviceInfo
+  info: DeviceInfo,
 ): SnapshotHeaderResponse => {
   // Layout: channelMap[numChannels] + divider(4) + preTrig(4) + threshold(4) + channel(1) + mode(1) + rtValues[rtCount * 4]
   const headerFixedSize = info.numChannels + 4 + 4 + 4 + 1 + 1;
@@ -292,7 +340,9 @@ export const decodeSnapshotHeaderResponse = (
   const expectedSize = headerFixedSize + rtValuesSize;
 
   if (payload.length !== expectedSize) {
-    throw new Error(`SnapshotHeaderResponse wrong size: ${payload.length} vs expected ${expectedSize}`);
+    throw new Error(
+      `SnapshotHeaderResponse wrong size: ${payload.length} vs expected ${expectedSize}`,
+    );
   }
 
   let offset = 0;
@@ -339,11 +389,13 @@ export const decodeSnapshotHeaderResponse = (
 export const decodeSnapshotDataResponse = (
   payload: Uint8Array,
   info: DeviceInfo,
-  sampleCount: number
+  sampleCount: number,
 ): SnapshotDataResponse => {
   const expectedSize = sampleCount * info.numChannels * 4;
   if (payload.length !== expectedSize) {
-    throw new Error(`SnapshotDataResponse wrong size: ${payload.length} vs expected ${expectedSize}`);
+    throw new Error(
+      `SnapshotDataResponse wrong size: ${payload.length} vs expected ${expectedSize}`,
+    );
   }
 
   const samples: number[][] = [];
@@ -375,7 +427,7 @@ export const encodeGetTimingRequest = (): Uint8Array => {
 export const encodeSetTimingRequest = (
   divider: number,
   preTrig: number,
-  endianness: Endianness
+  endianness: Endianness,
 ): Uint8Array => {
   const littleEndian = isLittleEndian(endianness);
   const buf = new Uint8Array(1 + 8); // TYPE + 4B divider + 4B preTrig
@@ -411,7 +463,7 @@ export const encodeGetSnapshotHeaderRequest = (): Uint8Array => {
 export const encodeGetSnapshotDataRequest = (
   startSample: number,
   sampleCount: number,
-  endianness: Endianness
+  endianness: Endianness,
 ): Uint8Array => {
   const littleEndian = isLittleEndian(endianness);
   const buf = new Uint8Array(1 + 3); // TYPE + 2B start + 1B count
@@ -421,7 +473,10 @@ export const encodeGetSnapshotDataRequest = (
   return buf;
 };
 
-export const encodeGetVarListRequest = (startIdx: number, maxCount: number): Uint8Array => {
+export const encodeGetVarListRequest = (
+  startIdx: number,
+  maxCount: number,
+): Uint8Array => {
   const buf = new Uint8Array(3);
   buf[0] = MessageType.GET_VAR_LIST;
   writeU8(buf, 1, startIdx);
@@ -435,7 +490,7 @@ export const encodeGetChannelMapRequest = (): Uint8Array => {
 
 export const encodeSetChannelMapRequest = (
   channelIdx: number,
-  catalogIdx: number
+  catalogIdx: number,
 ): Uint8Array => {
   const buf = new Uint8Array(3); // TYPE + channelIdx + catalogIdx
   buf[0] = MessageType.SET_CHANNEL_MAP;
@@ -446,7 +501,7 @@ export const encodeSetChannelMapRequest = (
 
 export const encodeGetChannelLabelsRequest = (
   startIdx: number,
-  maxCount: number
+  maxCount: number,
 ): Uint8Array => {
   const buf = new Uint8Array(3);
   buf[0] = MessageType.GET_CHANNEL_LABELS;
@@ -455,7 +510,10 @@ export const encodeGetChannelLabelsRequest = (
   return buf;
 };
 
-export const encodeGetRtLabelsRequest = (startIdx: number, maxCount: number): Uint8Array => {
+export const encodeGetRtLabelsRequest = (
+  startIdx: number,
+  maxCount: number,
+): Uint8Array => {
   const buf = new Uint8Array(3);
   buf[0] = MessageType.GET_RT_LABELS;
   writeU8(buf, 1, startIdx);
@@ -473,7 +531,7 @@ export const encodeGetRtBufferRequest = (index: number): Uint8Array => {
 export const encodeSetRtBufferRequest = (
   index: number,
   value: number,
-  endianness: Endianness
+  endianness: Endianness,
 ): Uint8Array => {
   const littleEndian = isLittleEndian(endianness);
   const buf = new Uint8Array(1 + 1 + 4); // TYPE + index + float
@@ -491,7 +549,7 @@ export const encodeSetTriggerRequest = (
   threshold: number,
   channel: number,
   mode: TriggerMode,
-  endianness: Endianness
+  endianness: Endianness,
 ): Uint8Array => {
   const littleEndian = isLittleEndian(endianness);
   const buf = new Uint8Array(1 + 6); // TYPE + float + u8 + u8

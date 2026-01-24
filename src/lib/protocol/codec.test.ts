@@ -35,8 +35,14 @@ import {
   encodeGetTriggerRequest,
   encodeSetTriggerRequest,
 } from "./codec";
-import { Endianness, MessageType, State, TriggerMode, ErrorCode } from "./types";
-import type { DeviceInfo } from "./device-info";
+import {
+  Endianness,
+  MessageType,
+  State,
+  TriggerMode,
+  ErrorCode,
+} from "./types";
+import type { DeviceInfo } from "./schemas";
 import { writeU32LE, writeF32LE } from "./bytes";
 
 // Test fixture: typical device info
@@ -54,18 +60,26 @@ const testDeviceInfo: DeviceInfo = {
 
 describe("checkForDeviceError", () => {
   it("does nothing for non-error type", () => {
-    expect(() => checkForDeviceError(MessageType.GET_INFO, new Uint8Array([]))).not.toThrow();
+    expect(() =>
+      checkForDeviceError(MessageType.GET_INFO, new Uint8Array([])),
+    ).not.toThrow();
   });
 
   it("throws DeviceError for error type", () => {
     expect(() =>
-      checkForDeviceError(MessageType.ERROR, new Uint8Array([ErrorCode.BAD_PARAM]))
+      checkForDeviceError(
+        MessageType.ERROR,
+        new Uint8Array([ErrorCode.BAD_PARAM]),
+      ),
     ).toThrow(DeviceError);
   });
 
   it("throws with correct error code", () => {
     try {
-      checkForDeviceError(MessageType.ERROR, new Uint8Array([ErrorCode.NOT_READY]));
+      checkForDeviceError(
+        MessageType.ERROR,
+        new Uint8Array([ErrorCode.NOT_READY]),
+      );
       expect.unreachable("should have thrown");
     } catch (e) {
       expect(e).toBeInstanceOf(DeviceError);
@@ -74,9 +88,9 @@ describe("checkForDeviceError", () => {
   });
 
   it("throws for malformed error response", () => {
-    expect(() => checkForDeviceError(MessageType.ERROR, new Uint8Array([]))).toThrow(
-      "Malformed error response"
-    );
+    expect(() =>
+      checkForDeviceError(MessageType.ERROR, new Uint8Array([])),
+    ).toThrow("Malformed error response");
   });
 });
 
@@ -156,7 +170,9 @@ describe("decodeTimingResponse", () => {
   });
 
   it("throws on too short", () => {
-    expect(() => decodeTimingResponse(new Uint8Array(4), testDeviceInfo)).toThrow("too short");
+    expect(() =>
+      decodeTimingResponse(new Uint8Array(4), testDeviceInfo),
+    ).toThrow("too short");
   });
 });
 
@@ -187,7 +203,9 @@ describe("decodeTriggerResponse", () => {
   });
 
   it("throws on non-empty payload", () => {
-    expect(() => decodeTriggerResponse(new Uint8Array([0x00]))).toThrow("should be empty");
+    expect(() => decodeTriggerResponse(new Uint8Array([0x00]))).toThrow(
+      "should be empty",
+    );
   });
 });
 
@@ -205,7 +223,9 @@ describe("decodeFrameResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeFrameResponse(new Uint8Array(8), testDeviceInfo)).toThrow("wrong size");
+    expect(() =>
+      decodeFrameResponse(new Uint8Array(8), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
@@ -217,7 +237,9 @@ describe("decodeChannelMapResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeChannelMapResponse(new Uint8Array(3), testDeviceInfo)).toThrow("wrong size");
+    expect(() =>
+      decodeChannelMapResponse(new Uint8Array(3), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
@@ -230,8 +252,12 @@ describe("decodeSetChannelMapResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeSetChannelMapResponse(new Uint8Array(3))).toThrow("wrong size");
-    expect(() => decodeSetChannelMapResponse(new Uint8Array(1))).toThrow("wrong size");
+    expect(() => decodeSetChannelMapResponse(new Uint8Array(3))).toThrow(
+      "wrong size",
+    );
+    expect(() => decodeSetChannelMapResponse(new Uint8Array(1))).toThrow(
+      "wrong size",
+    );
   });
 });
 
@@ -255,9 +281,9 @@ describe("decodeChannelLabelsResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeChannelLabelsResponse(new Uint8Array(10), testDeviceInfo)).toThrow(
-      "wrong size"
-    );
+    expect(() =>
+      decodeChannelLabelsResponse(new Uint8Array(10), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
@@ -288,7 +314,35 @@ describe("decodeVarListResponse", () => {
   });
 
   it("throws on too short header", () => {
-    expect(() => decodeVarListResponse(new Uint8Array(2), testDeviceInfo)).toThrow("too short");
+    expect(() =>
+      decodeVarListResponse(new Uint8Array(2), testDeviceInfo),
+    ).toThrow("too short");
+  });
+});
+
+describe("decodeRtLabelsResponse", () => {
+  it("decodes RT labels", () => {
+    const count = 2;
+    const payload = new Uint8Array(3 + count * testDeviceInfo.nameLen);
+    payload[0] = testDeviceInfo.rtCount; // totalCount
+    payload[1] = 0; // startIdx
+    payload[2] = count; // count
+    const labels = ["RT0", "RT1"];
+    labels.forEach((label, i) => {
+      const encoded = new TextEncoder().encode(label);
+      payload.set(encoded, 3 + i * testDeviceInfo.nameLen);
+    });
+
+    const result = decodeRtLabelsResponse(payload, testDeviceInfo);
+    expect(result.totalCount).toBe(4);
+    expect(result.startIdx).toBe(0);
+    expect(result.entries).toEqual(labels);
+  });
+
+  it("throws on too short header", () => {
+    expect(() =>
+      decodeRtLabelsResponse(new Uint8Array(2), testDeviceInfo),
+    ).toThrow("too short");
   });
 });
 
@@ -301,7 +355,9 @@ describe("decodeRtBufferResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeRtBufferResponse(new Uint8Array(3), testDeviceInfo)).toThrow("wrong size");
+    expect(() =>
+      decodeRtBufferResponse(new Uint8Array(3), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
@@ -319,9 +375,9 @@ describe("decodeTriggerParamsResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeTriggerParamsResponse(new Uint8Array(4), testDeviceInfo)).toThrow(
-      "wrong size"
-    );
+    expect(() =>
+      decodeTriggerParamsResponse(new Uint8Array(4), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
@@ -366,16 +422,18 @@ describe("decodeSnapshotHeaderResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeSnapshotHeaderResponse(new Uint8Array(10), testDeviceInfo)).toThrow(
-      "wrong size"
-    );
+    expect(() =>
+      decodeSnapshotHeaderResponse(new Uint8Array(10), testDeviceInfo),
+    ).toThrow("wrong size");
   });
 });
 
 describe("decodeSnapshotDataResponse", () => {
   it("decodes snapshot data", () => {
     const sampleCount = 3;
-    const payload = new Uint8Array(sampleCount * testDeviceInfo.numChannels * 4);
+    const payload = new Uint8Array(
+      sampleCount * testDeviceInfo.numChannels * 4,
+    );
     let offset = 0;
     for (let s = 0; s < sampleCount; s++) {
       for (let c = 0; c < testDeviceInfo.numChannels; c++) {
@@ -384,7 +442,11 @@ describe("decodeSnapshotDataResponse", () => {
       }
     }
 
-    const result = decodeSnapshotDataResponse(payload, testDeviceInfo, sampleCount);
+    const result = decodeSnapshotDataResponse(
+      payload,
+      testDeviceInfo,
+      sampleCount,
+    );
     expect(result.samples).toHaveLength(3);
     expect(result.samples[0]).toEqual([0, 1, 2, 3, 4]);
     expect(result.samples[1]).toEqual([10, 11, 12, 13, 14]);
@@ -392,9 +454,9 @@ describe("decodeSnapshotDataResponse", () => {
   });
 
   it("throws on wrong size", () => {
-    expect(() => decodeSnapshotDataResponse(new Uint8Array(10), testDeviceInfo, 3)).toThrow(
-      "wrong size"
-    );
+    expect(() =>
+      decodeSnapshotDataResponse(new Uint8Array(10), testDeviceInfo, 3),
+    ).toThrow("wrong size");
   });
 });
 
@@ -421,14 +483,26 @@ describe("encodeSetTimingRequest", () => {
     expect(result.length).toBe(9);
 
     // Verify values can be decoded back
-    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    const view = new DataView(
+      result.buffer,
+      result.byteOffset,
+      result.byteLength,
+    );
     expect(view.getUint32(1, true)).toBe(100);
     expect(view.getUint32(5, true)).toBe(500);
   });
 
   it("encodes big-endian values when requested", () => {
-    const result = encodeSetTimingRequest(0x12345678, 0x0a0b0c0d, Endianness.Big);
-    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    const result = encodeSetTimingRequest(
+      0x12345678,
+      0x0a0b0c0d,
+      Endianness.Big,
+    );
+    const view = new DataView(
+      result.buffer,
+      result.byteOffset,
+      result.byteLength,
+    );
     expect(view.getUint32(1, false)).toBe(0x12345678);
     expect(view.getUint32(5, false)).toBe(0x0a0b0c0d);
   });
@@ -444,7 +518,9 @@ describe("encodeGetStateRequest", () => {
 describe("encodeSetStateRequest", () => {
   it("encodes state", () => {
     const result = encodeSetStateRequest(State.RUNNING);
-    expect(result).toEqual(new Uint8Array([MessageType.SET_STATE, State.RUNNING]));
+    expect(result).toEqual(
+      new Uint8Array([MessageType.SET_STATE, State.RUNNING]),
+    );
   });
 });
 
@@ -475,7 +551,11 @@ describe("encodeGetSnapshotDataRequest", () => {
     expect(result[0]).toBe(MessageType.GET_SNAPSHOT_DATA);
     expect(result.length).toBe(4);
 
-    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    const view = new DataView(
+      result.buffer,
+      result.byteOffset,
+      result.byteLength,
+    );
     expect(view.getUint16(1, true)).toBe(100);
     expect(result[3]).toBe(10);
   });
@@ -540,7 +620,11 @@ describe("encodeSetRtBufferRequest", () => {
     expect(result.length).toBe(6);
 
     // Verify float can be decoded back
-    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    const view = new DataView(
+      result.buffer,
+      result.byteOffset,
+      result.byteLength,
+    );
     expect(view.getFloat32(2, true)).toBe(42.5);
   });
 });
@@ -554,11 +638,20 @@ describe("encodeGetTriggerRequest", () => {
 
 describe("encodeSetTriggerRequest", () => {
   it("encodes threshold, channel, and mode", () => {
-    const result = encodeSetTriggerRequest(1.5, 2, TriggerMode.BOTH, Endianness.Little);
+    const result = encodeSetTriggerRequest(
+      1.5,
+      2,
+      TriggerMode.BOTH,
+      Endianness.Little,
+    );
     expect(result[0]).toBe(MessageType.SET_TRIGGER);
     expect(result.length).toBe(7);
 
-    const view = new DataView(result.buffer, result.byteOffset, result.byteLength);
+    const view = new DataView(
+      result.buffer,
+      result.byteOffset,
+      result.byteLength,
+    );
     expect(view.getFloat32(1, true)).toBe(1.5);
     expect(result[5]).toBe(2);
     expect(result[6]).toBe(TriggerMode.BOTH);

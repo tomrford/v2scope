@@ -24,6 +24,5 @@ export {
 
 // Protocol types, schemas, and codec
 export * from "./types";
-export type { DeviceInfo } from "./device-info";
 export * from "./schemas";
 export * from "./codec";

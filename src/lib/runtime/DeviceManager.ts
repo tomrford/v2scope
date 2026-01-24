@@ -1,6 +1,6 @@
 import { Context, Effect, HashMap, Layer, Option, Ref } from "effect";
 import type { DeviceInfo } from "../protocol";
-import type { SerialConfig } from "../types";
+import type { SerialConfig } from "../transport/serial.schema";
 import type { DeviceError } from "../errors";
 import { DeviceHandle } from "./DeviceHandle";
 import { DeviceService } from "./DeviceService";
@@ -20,7 +20,7 @@ export interface ConnectedDevice {
 export interface DeviceManagerShape {
   readonly connect: (
     path: string,
-    config: SerialConfig
+    config: SerialConfig,
   ) => Effect.Effect<ConnectedDevice, DeviceError>;
   readonly disconnect: (path: string) => Effect.Effect<void, never>;
   readonly getActiveDevices: () => Effect.Effect<
@@ -28,7 +28,7 @@ export interface DeviceManagerShape {
     never
   >;
   readonly getDevice: (
-    path: string
+    path: string,
   ) => Effect.Effect<ConnectedDevice | null, never>;
 }
 
@@ -86,17 +86,15 @@ export const DeviceManagerLive = Layer.effect(
         }),
 
       getActiveDevices: () =>
-        Ref.get(devices).pipe(
-          Effect.map((m) => Array.from(HashMap.values(m)))
-        ),
+        Ref.get(devices).pipe(Effect.map((m) => Array.from(HashMap.values(m)))),
 
       getDevice: (path) =>
         Ref.get(devices).pipe(
           Effect.map((m) => {
             const result = HashMap.get(m, path);
             return Option.isSome(result) ? result.value : null;
-          })
+          }),
         ),
     };
-  })
+  }),
 );

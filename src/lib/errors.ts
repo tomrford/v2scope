@@ -1,6 +1,7 @@
 import { Data } from "effect";
 import { DeviceError as CodecDeviceError, ErrorCode } from "./protocol";
 
+/* eslint-disable @typescript-eslint/no-empty-object-type -- Effect TaggedEnum requires {} for data-less variants */
 export type SerialError = Data.TaggedEnum<{
   PortNotFound: { readonly path: string };
   PortBusy: { readonly path: string };
@@ -23,6 +24,7 @@ export type ProtocolError = Data.TaggedEnum<{
   NotReady: {};
   DecodeError: { readonly message: string };
 }>;
+/* eslint-enable @typescript-eslint/no-empty-object-type */
 
 export const ProtocolError = Data.taggedEnum<ProtocolError>();
 
@@ -43,7 +45,11 @@ export const fromCodecError = (e: unknown): ProtocolError => {
     }
   }
   const message =
-    e instanceof Error ? e.message : typeof e === "string" ? e : "unknown error";
+    e instanceof Error
+      ? e.message
+      : typeof e === "string"
+        ? e
+        : "unknown error";
   return ProtocolError.DecodeError({ message });
 };
 

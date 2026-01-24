@@ -1,11 +1,11 @@
 import { Effect } from "effect";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { parseSerialError, type SerialError } from "./errors";
-import type { PortFilter, PortInfo, SerialConfig } from "./types";
+import { parseSerialError, type SerialError } from "../errors";
+import type { PortFilter, PortInfo, SerialConfig } from "./serial.schema";
 
 const invoke = <A>(
   cmd: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
 ): Effect.Effect<A, SerialError> =>
   Effect.tryPromise({
     try: () => tauriInvoke<A>(cmd, args),
@@ -13,29 +13,29 @@ const invoke = <A>(
   });
 
 export const listPorts = (
-  filter?: PortFilter
+  filter?: PortFilter,
 ): Effect.Effect<PortInfo[], SerialError> =>
   invoke<PortInfo[]>("list_ports", { filters: filter });
 
 export const openDevice = (
   path: string,
-  config: SerialConfig
+  config: SerialConfig,
 ): Effect.Effect<number, SerialError> =>
   invoke<number>("open_device", { path, config });
 
 export const closeDevice = (
-  handleId: number
+  handleId: number,
 ): Effect.Effect<void, SerialError> =>
   invoke<void>("close_device", { handleId });
 
 export const flushDevice = (
-  handleId: number
+  handleId: number,
 ): Effect.Effect<void, SerialError> =>
   invoke<void>("flush_device", { handleId });
 
 export const sendRequest = (
   handleId: number,
-  payload: Uint8Array
+  payload: Uint8Array,
 ): Effect.Effect<Uint8Array, SerialError> =>
   invoke<number[]>("send_request", {
     handleId,

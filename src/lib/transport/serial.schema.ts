@@ -7,7 +7,6 @@ export const SerialConfigSchema = z.object({
   stopBits: z.enum(["One", "Two"]),
   readTimeoutMs: z.number().int().nonnegative(),
 });
-
 export type SerialConfig = z.infer<typeof SerialConfigSchema>;
 
 export const PortFilterSchema = z.object({
@@ -15,7 +14,6 @@ export const PortFilterSchema = z.object({
   pid: z.number().int().min(0).max(0xffff).optional(),
   nameSubstr: z.string().min(1).optional(),
 });
-
 export type PortFilter = z.infer<typeof PortFilterSchema>;
 
 export const PortInfoSchema = z.object({
@@ -27,29 +25,21 @@ export const PortInfoSchema = z.object({
   serialNumber: z.string().nullable(),
   portType: z.enum(["usb", "bluetooth", "pci", "unknown"]),
 });
-
 export type PortInfo = z.infer<typeof PortInfoSchema>;
 
 export const OpenDeviceInputSchema = z.object({
   path: z.string().min(1),
   config: SerialConfigSchema,
 });
-
 export type OpenDeviceInput = z.infer<typeof OpenDeviceInputSchema>;
 
-export const CloseDeviceInputSchema = z.object({
+const HandleIdSchema = z.object({
   handleId: z.number().int().positive(),
 });
+export type CloseDeviceInput = z.infer<typeof HandleIdSchema>;
+export type FlushDeviceInput = z.infer<typeof HandleIdSchema>;
 
-export type CloseDeviceInput = z.infer<typeof CloseDeviceInputSchema>;
-
-export const FlushDeviceInputSchema = CloseDeviceInputSchema;
-
-export type FlushDeviceInput = z.infer<typeof FlushDeviceInputSchema>;
-
-export const SendRequestInputSchema = z.object({
-  handleId: z.number().int().positive(),
+export const SendRequestInputSchema = HandleIdSchema.extend({
   payload: z.array(z.number().int().min(0).max(255)).min(1),
 });
-
 export type SendRequestInput = z.infer<typeof SendRequestInputSchema>;

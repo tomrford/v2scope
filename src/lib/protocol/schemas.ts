@@ -5,7 +5,20 @@
  */
 
 import { z } from "zod";
-import { State, TriggerMode } from "./types";
+import { Endianness, State, TriggerMode } from "./types";
+
+export const DeviceInfoSchema = z.object({
+  numChannels: z.number().int().nonnegative(),
+  bufferSize: z.number().int().nonnegative(),
+  isrKhz: z.number().int().nonnegative(),
+  varCount: z.number().int().nonnegative(),
+  rtCount: z.number().int().nonnegative(),
+  rtBufferLen: z.number().int().nonnegative(),
+  nameLen: z.number().int().nonnegative(),
+  endianness: z.enum(Endianness),
+  deviceName: z.string(),
+});
+export type DeviceInfo = z.infer<typeof DeviceInfoSchema>;
 
 // --- Response schemas ---
 
@@ -16,7 +29,7 @@ export const TimingResponseSchema = z.object({
 export type TimingResponse = z.infer<typeof TimingResponseSchema>;
 
 export const StateResponseSchema = z.object({
-  state: z.nativeEnum(State),
+  state: z.enum(State),
 });
 export type StateResponse = z.infer<typeof StateResponseSchema>;
 
@@ -62,7 +75,7 @@ export type RtBufferResponse = z.infer<typeof RtBufferResponseSchema>;
 export const TriggerResponseSchema = z.object({
   threshold: z.number(),
   channel: z.number().int().nonnegative(),
-  mode: z.nativeEnum(TriggerMode),
+  mode: z.enum(TriggerMode),
 });
 export type TriggerResponse = z.infer<typeof TriggerResponseSchema>;
 
@@ -72,10 +85,12 @@ export const SnapshotHeaderResponseSchema = z.object({
   preTrig: z.number().int().nonnegative(),
   triggerThreshold: z.number(),
   triggerChannel: z.number().int().nonnegative(),
-  triggerMode: z.nativeEnum(TriggerMode),
+  triggerMode: z.enum(TriggerMode),
   rtValues: z.array(z.number()),
 });
-export type SnapshotHeaderResponse = z.infer<typeof SnapshotHeaderResponseSchema>;
+export type SnapshotHeaderResponse = z.infer<
+  typeof SnapshotHeaderResponseSchema
+>;
 
 export const SnapshotDataResponseSchema = z.object({
   samples: z.array(z.array(z.number())), // samples[sample_idx][channel_idx]
@@ -91,7 +106,7 @@ export const SetTimingRequestSchema = z.object({
 export type SetTimingRequest = z.infer<typeof SetTimingRequestSchema>;
 
 export const SetStateRequestSchema = z.object({
-  state: z.nativeEnum(State),
+  state: z.enum(State),
 });
 export type SetStateRequest = z.infer<typeof SetStateRequestSchema>;
 
@@ -105,7 +120,9 @@ export const GetSnapshotDataRequestSchema = z.object({
   startSample: z.number().int().nonnegative(),
   sampleCount: z.number().int().positive(),
 });
-export type GetSnapshotDataRequest = z.infer<typeof GetSnapshotDataRequestSchema>;
+export type GetSnapshotDataRequest = z.infer<
+  typeof GetSnapshotDataRequestSchema
+>;
 
 export const GetVarListRequestSchema = z.object({
   startIdx: z.number().int().nonnegative(),
@@ -133,6 +150,6 @@ export type SetRtBufferRequest = z.infer<typeof SetRtBufferRequestSchema>;
 export const SetTriggerRequestSchema = z.object({
   threshold: z.number(),
   channel: z.number().int().nonnegative(),
-  mode: z.nativeEnum(TriggerMode),
+  mode: z.enum(TriggerMode),
 });
 export type SetTriggerRequest = z.infer<typeof SetTriggerRequestSchema>;

@@ -7,7 +7,10 @@
 
 <style>
   :root {
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      sans-serif;
     color: #f6f6f6;
     background-color: #1a1a1a;
   }
