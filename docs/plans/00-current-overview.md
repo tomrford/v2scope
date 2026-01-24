@@ -61,7 +61,7 @@ Protocol is fixed 9-byte request: 1-byte key + 8-byte payload. Response size var
 | `B` | SET_BUFF   | index + float        | 1B (0=ok)                                                    |
 | `f` | GET_FRAME  | padding              | N channels \* 4B float                                       |
 | `l` | GET_LABEL  | padding + channel    | 0..40B null-terminated string                                |
-| `d` | DOWNLOAD   | padding              | buffer_len _ channels _ 4B float                             |
+| `d` | DOWNLOAD   | padding              | buffer*len * channels \_ 4B float                            |
 
 Notes:
 
