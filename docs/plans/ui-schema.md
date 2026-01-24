@@ -16,7 +16,7 @@ Previously we had all the buttons visible for the main view and had the live plo
 
 ## General Settings
 
-Somewhere to set app-wide settings - polling rates, default serial settings, snapshot garbage collection policy, automatically saving snapshots - are the only ones that come to mind for now.
+Somewhere to set app-wide settings - polling rates, default serial settings, snapshot garbage collection policy, automatically saving snapshots - are the only ones that come to mind for now. UPDATE: This uses tauri stores and a svelte store for the backend logic, is already implemented - we just need to provide a modal for editing them.
 
 ## Snapshots
 
@@ -27,7 +27,5 @@ Should be a separate table in a separate view that shows the list with all the r
 Plots should end up with their own dedicated views. We should open one on download of a snapshot automatically for it. How we do these I'm not sure; We could have a tab bar but I don't know how it handles large amounts of stuff? We could do a sidebar with a split of persistent views (main, snapshots etc) and transient views (plots) below in a separate section?. With scrolling, this feels better.
 
 # Some missing parts
-
-We have not yet handled settings as a config file in the XDG config directory - we need to do this for our settings to persist nicely.
 
 We have not yet handled snapshot saving/lazy-loading - this mechanism should be the same as before (gets saved somewhere in appdata as binary blob plus metadata json file, all metadata are grabbed on open and the blobs are lazy loaded when needed). We need to determine how we are writing/reading these.

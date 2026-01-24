@@ -20,6 +20,7 @@
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-store": "2.4.2",
     "effect": "3.19.14",
     "restructure": "3.0.2",
     "zod": "4.3.5"
