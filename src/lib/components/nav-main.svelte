@@ -22,13 +22,12 @@
 </script>
 
 <Sidebar.Group>
-	<Sidebar.GroupLabel>Platform</Sidebar.GroupLabel>
 	<Sidebar.Menu>
 		{#each items as mainItem (mainItem.title)}
 			<Collapsible.Root open={mainItem.isActive}>
 				{#snippet child({ props })}
 					<Sidebar.MenuItem {...props}>
-						<Sidebar.MenuButton tooltipContent={mainItem.title}>
+					<Sidebar.MenuButton tooltipContent={mainItem.title} isActive={mainItem.isActive}>
 							{#snippet child({ props })}
 								<a href={mainItem.url} {...props}>
 									<mainItem.icon />

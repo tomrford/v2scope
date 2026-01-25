@@ -103,6 +103,7 @@ export type RuntimeEvent =
   | {
       readonly type: "rtBufferUpdated";
       readonly path: string;
+      readonly index: number;
       readonly rt: RtBufferResponse;
     };
 
@@ -409,7 +410,8 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               false,
               commandRetryCount,
               false,
-              (path, rt) => emit({ type: "rtBufferUpdated", path, rt }),
+              (path, rt) =>
+                emit({ type: "rtBufferUpdated", path, index: cmd.index, rt }),
             );
         }
       };

@@ -9,6 +9,7 @@ Tauri + Rust + Svelte rewrite of the vscope debug interface for embedded microco
 **TypeScript/Effect (src):** Device lifecycle, polling loops (state @20Hz, frame @10Hz), retry/backoff, UI state, multi-device coordination.
 
 **Svelte UI:** One-page control panel + live plot area.
+**UI components:** shadcn-svelte components in `src/lib/components/ui` for most UI.
 
 ## Key Concepts
 
@@ -46,6 +47,7 @@ See `docs/plans/` for detailed specs:
 ## Project memory
 
 - Pre-release protocol; no backward-compat effort needed yet.
+- Early dev: no settings migrations needed (rename fields directly).
 - Onboard C: snapshot header now returns dynamic metadata (channel map, divider, pre_trig, trigger params, rt values); snapshot validity set false on RUNNING, true only on ACQUIRING->HALTED; header/data return NOT_READY if invalid.
 - GET_INFO extended with rt_count/rt_buffer_len/name_len; name len now 16; device name provided by caller (no default).
 - First_element remains internal only; client uses GET_INFO buffer_size.

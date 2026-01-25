@@ -21,6 +21,27 @@ export {
   type RuntimeEvent,
 } from "./RuntimeService";
 
+export {
+  deviceSessions,
+  connectedSessions,
+  compatibility,
+  compatibleSessions,
+  startRuntimeStores,
+  stopRuntimeStores,
+  enqueueRuntimeCommand,
+  runRuntimeEffect,
+} from "./store";
+
+export {
+  listPorts,
+  addToSaved,
+  removeSaved,
+  activatePorts,
+  deactivatePorts,
+  resyncPorts,
+  enqueueCommands,
+} from "./devices";
+
 /**
  * DeviceManager layer with DeviceService dependency wired in.
  */

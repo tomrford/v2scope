@@ -5,13 +5,13 @@ Structured workflow for device discovery, selection, connection, and status.
 ## Core concepts
 
 - **Available devices**: list from `list_ports`
-- **Selected devices**: user-curated set; persists across sessions
-- **Active devices**: selected + connected + responding
-- **Deactivated devices**: selected but intentionally inactive; show in Recents
+- **Saved devices**: user-curated set; persists across sessions
+- **Active devices**: saved + connected + responding
+- **Inactive devices**: saved but intentionally inactive; show in Saved list
 
 ## Devices page layout
 
-- **Primary table**: Selected devices (rows persist when not connected)
+- **Primary table**: Saved devices (rows persist when not connected)
 - **Indicators**: status dot + text badge per row
 - **Actions**: add devices, resync all, default serial settings, per-row menu
 
@@ -28,12 +28,12 @@ No badge means no successful connect attempt yet or device missing.
 1. User clicks **Add Devices** button.
 2. Modal opens with loading state.
 3. Call `list_ports`; on success render table.
-4. Table shows columns: `status` (if already selected), `path`, `vid/pid`,
+4. Table shows columns: `status` (if already saved), `path`, `vid/pid`,
    `port name`.
 5. User selects one or more rows.
 6. User clicks **Add** (bottom-right).
-7. Modal closes; selected devices appear in Selected table.
-8. Background: attempt `connect` on new selections.
+7. Modal closes; saved devices appear in Saved table.
+8. Background: attempt `connect` on new actives.
 
 ### Modal states
 
@@ -43,14 +43,14 @@ No badge means no successful connect attempt yet or device missing.
 
 ### Modal selection rules
 
-- Status column shows a compact badge for existing selected rows only
-- Use only the three tracked states (Connected/Error/Deactivated)
-- Disable rows already in Selected list
+- Status column shows a compact badge for existing saved rows only
+- Use only the three tracked states (Connected/Error/Inactive)
+- Disable rows already in Saved list
 - Preserve multi-select across filters
 - Optional search/filter for path/name/vendor
 - Manual refresh button in modal header/footer
 
-## Selected devices table
+## Saved devices table
 
 Columns (suggested):
 
@@ -69,7 +69,7 @@ Row actions:
   - Edit serial settings (per-device override)
   - Retry connect
   - Deactivate / Activate toggle
-  - Remove from selected
+  - Remove from saved
 
 ## Connection workflow
 
@@ -80,27 +80,26 @@ Row actions:
 
 ## Deactivate vs remove
 
-- **Deactivate**: stop polling and disconnect; keep in recents
-- **Remove**: drop from selected and recents (explicit action)
+- **Deactivate**: stop polling and disconnect; keep in saved
+- **Remove**: drop from saved (explicit action)
 
 ## Resync all
 
 - Button on Devices page
 - Refresh `list_ports` first, then attempt `connect` only for
-  - selected devices in Error state
+  - active devices in Error state
   - paths present in the latest port list
-- Skip Connected and Deactivated devices
-- On app startup: attempt auto-connect for all selected devices present in the
+- Skip Connected and Inactive devices
+- On app startup: attempt auto-connect for all active devices present in the
   current port list; leave missing devices with no status badge
 
 ## Persistence
 
 - Settings schema supports
   - `defaultSerialConfig`
-  - `recentPorts[]` with `lastConfig` and `lastConnected`
-- Selected devices derived from `recentPorts`, per-device settings from
-  `recentPorts[].lastConfig` when present
-- Recents show deactivated entries (read-only if device missing)
+- `savedPorts[]` with `lastConfig`
+- Active devices derived from `activePorts`, per-device settings from
+  `savedPorts[].lastConfig` when present
 
 ## Edge cases to handle
 

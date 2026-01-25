@@ -14,6 +14,7 @@
 		ref = $bindable(null),
 		open = $bindable(true),
 		onOpenChange = () => {},
+		disableKeyboardShortcut = false,
 		class: className,
 		style,
 		children,
@@ -21,6 +22,7 @@
 	}: WithElementRef<HTMLAttributes<HTMLDivElement>> & {
 		open?: boolean;
 		onOpenChange?: (open: boolean) => void;
+		disableKeyboardShortcut?: boolean;
 	} = $props();
 
 	const sidebar = setSidebar({
@@ -35,7 +37,9 @@
 	});
 </script>
 
-<svelte:window onkeydown={sidebar.handleShortcutKeydown} />
+<svelte:window
+	onkeydown={disableKeyboardShortcut ? undefined : sidebar.handleShortcutKeydown}
+/>
 
 <Tooltip.Provider delayDuration={0}>
 	<div

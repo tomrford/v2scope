@@ -150,7 +150,7 @@ interface DeviceService {
 
 ### DeviceManager
 
-Coordinates multiple devices. Tracks selected vs active devices.
+Coordinates multiple devices. Tracks saved vs active devices.
 
 ```typescript
 interface DeviceManager {
@@ -183,10 +183,10 @@ type DeviceEvent =
 
 **Device tracking**:
 
-- `selectedDevices` - user's intended device set (persists across reconnects)
+- `savedDevices` - user's intended device set (persists across reconnects)
 - `activeDevices` - currently connected and responding subset
 
-When a device disconnects, it remains in `selectedDevices` but leaves `activeDevices`. UI shows disconnected state. User can see which selections have dropped without re-listing.
+When a device disconnects, it remains in `savedDevices` but leaves `activeDevices`. UI shows disconnected state. User can see which saved devices have dropped without re-listing.
 
 **Multi-device matching**:
 
@@ -316,7 +316,7 @@ interface AppConfig {
   liveBufferSize: number; // default 100
 
   // Serial history
-  recentPorts: RecentPort[];
+  savedPorts: SavedPort[];
 }
 ```
 

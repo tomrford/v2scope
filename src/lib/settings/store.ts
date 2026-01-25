@@ -67,3 +67,25 @@ export const snapshotConfig = derived(settings, (s) => ({
   autoSave: s.snapshotAutoSave,
   gcDays: s.snapshotGcDays,
 }));
+
+export const activePorts = derived(settings, (s) => s.activePorts);
+
+const normalizePorts = (paths: string[]): string[] =>
+  Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
+
+export async function setActivePorts(paths: string[]): Promise<void> {
+  await updateSetting("activePorts", normalizePorts(paths));
+}
+
+export async function addActivePort(path: string): Promise<void> {
+  const current = get(settings).activePorts;
+  await updateSetting("activePorts", normalizePorts([...current, path]));
+}
+
+export async function removeActivePort(path: string): Promise<void> {
+  const current = get(settings).activePorts;
+  await updateSetting(
+    "activePorts",
+    normalizePorts(current.filter((p) => p !== path)),
+  );
+}

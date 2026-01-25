@@ -6,14 +6,18 @@ export {
   defaultSerialConfig,
   pollingConfig,
   snapshotConfig,
+  activePorts,
+  setActivePorts,
+  addActivePort,
+  removeActivePort,
 } from "./store";
 
 export { DEFAULT_SETTINGS } from "./defaults";
 
 export {
   SettingsSchema,
-  RecentPortSchema,
   type Settings,
-  type RecentPort,
+  SavedPortSchema,
+  type SavedPort,
   type SnapshotGcDays,
 } from "./schema";

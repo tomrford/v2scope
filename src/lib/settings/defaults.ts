@@ -13,7 +13,8 @@ export const DEFAULT_SETTINGS: Settings = {
     stopBits: "One",
     readTimeoutMs: 100,
   },
-  recentPorts: [],
+  activePorts: [],
+  savedPorts: [],
   snapshotAutoSave: false,
   snapshotGcDays: "never",
 };
