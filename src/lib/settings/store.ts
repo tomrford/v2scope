@@ -2,6 +2,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { writable, derived, get } from "svelte/store";
 import { DEFAULT_SETTINGS } from "./defaults";
 import { SettingsSchema, type Settings } from "./schema";
+import { migrateLegacySavedPorts } from "../ports/store";
 
 const STORE_FILE = "settings.json";
 let tauriStore: LazyStore | null = null;
@@ -19,8 +20,9 @@ export async function initSettings(): Promise<void> {
     defaults: { settings: DEFAULT_SETTINGS },
   });
 
-  const stored = await tauriStore.get<Partial<Settings>>("settings");
+  const stored = await tauriStore.get<Record<string, unknown>>("settings");
   if (stored) {
+    await migrateLegacySavedPorts(stored);
     // Merge stored with defaults (handles new settings gracefully)
     const merged = { ...DEFAULT_SETTINGS, ...stored };
     const parsed = SettingsSchema.safeParse(merged);
@@ -67,25 +69,3 @@ export const snapshotConfig = derived(settings, (s) => ({
   autoSave: s.snapshotAutoSave,
   gcDays: s.snapshotGcDays,
 }));
-
-export const activePorts = derived(settings, (s) => s.activePorts);
-
-const normalizePorts = (paths: string[]): string[] =>
-  Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
-
-export async function setActivePorts(paths: string[]): Promise<void> {
-  await updateSetting("activePorts", normalizePorts(paths));
-}
-
-export async function addActivePort(path: string): Promise<void> {
-  const current = get(settings).activePorts;
-  await updateSetting("activePorts", normalizePorts([...current, path]));
-}
-
-export async function removeActivePort(path: string): Promise<void> {
-  const current = get(settings).activePorts;
-  await updateSetting(
-    "activePorts",
-    normalizePorts(current.filter((p) => p !== path)),
-  );
-}

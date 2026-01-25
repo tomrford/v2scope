@@ -5,4 +5,3 @@ settings page uses radio groups for the fixed enum options of serial settings
 spinner for loading
 
 tanstack table core for the tables? https://www.shadcn-svelte.com/docs/components/data-table
-

@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { page } from "$app/stores";
+	import { resolve } from "$app/paths";
+	import { page } from "$app/state";
 	import NavMain from "./nav-main.svelte";
 	import NavProjects from "./nav-projects.svelte";
 	import NavSecondary from "./nav-secondary.svelte";
@@ -17,19 +18,19 @@
 			title: "Scope",
 			url: "/scope",
 			icon: AudioWaveformIcon,
-			isActive: $page.url.pathname.startsWith("/scope") || $page.url.pathname === "/",
+			isActive: page.url.pathname.startsWith("/scope") || page.url.pathname === "/",
 		},
 		{
 			title: "Devices",
 			url: "/devices",
 			icon: UsbIcon,
-			isActive: $page.url.pathname.startsWith("/devices"),
+			isActive: page.url.pathname.startsWith("/devices"),
 		},
 		{
 			title: "Snapshots",
 			url: "/snapshots",
 			icon: CameraIcon,
-			isActive: $page.url.pathname.startsWith("/snapshots"),
+			isActive: page.url.pathname.startsWith("/snapshots"),
 		},
 	]);
 
@@ -50,7 +51,7 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton size="lg">
 					{#snippet child({ props })}
-						<a href="/" {...props}>
+					<a href={resolve("/")} {...props}>
 							<div
 								class="bg-sidebar-primary text-sidebar-primary-foreground flex aspect-square size-8 items-center justify-center rounded-lg"
 							>

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from "$app/paths";
 	import * as Collapsible from "$lib/components/ui/collapsible/index.js";
 	import * as Sidebar from "$lib/components/ui/sidebar/index.js";
 	import ChevronRightIcon from "@lucide/svelte/icons/chevron-right";
@@ -29,7 +30,7 @@
 					<Sidebar.MenuItem {...props}>
 					<Sidebar.MenuButton tooltipContent={mainItem.title} isActive={mainItem.isActive}>
 							{#snippet child({ props })}
-								<a href={mainItem.url} {...props}>
+						<a href={resolve(mainItem.url as Parameters<typeof resolve>[0])} {...props}>
 									<mainItem.icon />
 									<span>{mainItem.title}</span>
 								</a>

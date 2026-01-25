@@ -2,6 +2,8 @@
 
 Tauri + Rust + Svelte rewrite of the vscope debug interface for embedded microcontrollers. Virtual oscilloscope (vscope) for viewing stored high-resolution runs as snapshots, plus real-time buffers (rtbuffers) for live control.
 
+We are building this pre-release. DO NOT under any circumstances value backwards compatibility whilst the application is unfinished and unused. Assume there is no historical data to migrate unless explicitly instructed otherwise.
+
 ## Architecture
 
 **Rust (src-tauri):** Serial port discovery/open/close, transport framing (CRSF-style: SYNC|LEN|TYPE|PAYLOAD|CRC), CRC, request/response, snapshot cache I/O. Keep Rust sync/simple; avoid complex async.
@@ -46,12 +48,9 @@ See `docs/plans/` for detailed specs:
 
 ## Project memory
 
-- Pre-release protocol; no backward-compat effort needed yet.
-- Early dev: no settings migrations needed (rename fields directly).
 - Onboard C: snapshot header now returns dynamic metadata (channel map, divider, pre_trig, trigger params, rt values); snapshot validity set false on RUNNING, true only on ACQUIRING->HALTED; header/data return NOT_READY if invalid.
 - GET_INFO extended with rt_count/rt_buffer_len/name_len; name len now 16; device name provided by caller (no default).
 - First_element remains internal only; client uses GET_INFO buffer_size.
-- Rust/Tauri side still unbuilt; C code only.
 
 ## TODOs
 

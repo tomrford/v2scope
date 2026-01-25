@@ -186,10 +186,6 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const clearDeviceError = (path: string) =>
         updateSession(path, (session) => ({ ...session, error: null }));
 
-      type DeviceResult<T> =
-        | { readonly path: string; readonly value: T }
-        | { readonly path: string; readonly error: DeviceError };
-
       const runOnDevices = <T>(
         label: string,
         run: (device: ConnectedDevice) => Effect.Effect<T, DeviceError>,

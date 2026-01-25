@@ -42,6 +42,8 @@
 </script>
 
 <script lang="ts">
+	import { resolve } from "$app/paths";
+
 	let {
 		class: className,
 		variant = "default",
@@ -56,18 +58,29 @@
 </script>
 
 {#if href}
-	<a
-		bind:this={ref}
-		data-slot="button"
-		class={cn(buttonVariants({ variant, size }), className)}
-		href={disabled ? undefined : href}
-		aria-disabled={disabled}
-		role={disabled ? "link" : undefined}
-		tabindex={disabled ? -1 : undefined}
-		{...restProps}
-	>
-		{@render children?.()}
-	</a>
+	{#if disabled}
+		<a
+			bind:this={ref}
+			data-slot="button"
+			class={cn(buttonVariants({ variant, size }), className)}
+			aria-disabled={disabled}
+			role="link"
+			tabindex={-1}
+			{...restProps}
+		>
+			{@render children?.()}
+		</a>
+	{:else}
+		<a
+			bind:this={ref}
+			data-slot="button"
+			class={cn(buttonVariants({ variant, size }), className)}
+			href={resolve(href as Parameters<typeof resolve>[0])}
+			{...restProps}
+		>
+			{@render children?.()}
+		</a>
+	{/if}
 {:else}
 	<button
 		bind:this={ref}

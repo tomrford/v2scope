@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SnapshotMetaSchema, type SnapshotMeta } from "./schema";
+import { SnapshotMetaSchema, type SnapshotMeta } from "./store";
+import { TriggerMode } from "../protocol/types";
 
 const validMeta: SnapshotMeta = {
   id: 1706123456789,
@@ -7,9 +8,12 @@ const validMeta: SnapshotMeta = {
   deviceNames: ["motor_controller"],
   channelCount: 5,
   sampleCount: 1024,
+  channelMap: [0, 1, 2, 3, 4],
   divider: 10,
   preTrig: 256,
-  triggerParams: [0.5, 1.0, 0.0, 0.0],
+  triggerThreshold: 0.5,
+  triggerChannel: 1,
+  triggerMode: TriggerMode.RISING,
   rtValues: [1.2, 3.4, 5.6],
   createdAt: "2024-01-24T12:34:56.789Z",
 };
@@ -17,13 +21,6 @@ const validMeta: SnapshotMeta = {
 describe("SnapshotMetaSchema", () => {
   test("accepts valid metadata", () => {
     const result = SnapshotMetaSchema.safeParse(validMeta);
-    expect(result.success).toBe(true);
-  });
-
-  test("accepts metadata without optional name", () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { name: _, ...withoutName } = validMeta;
-    const result = SnapshotMetaSchema.safeParse(withoutName);
     expect(result.success).toBe(true);
   });
 
@@ -48,6 +45,12 @@ describe("SnapshotMetaSchema", () => {
 
   test("rejects negative preTrig", () => {
     const invalid = { ...validMeta, preTrig: -1 };
+    const result = SnapshotMetaSchema.safeParse(invalid);
+    expect(result.success).toBe(false);
+  });
+
+  test("rejects invalid triggerMode", () => {
+    const invalid = { ...validMeta, triggerMode: 9 };
     const result = SnapshotMetaSchema.safeParse(invalid);
     expect(result.success).toBe(false);
   });

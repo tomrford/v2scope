@@ -1,5 +1,8 @@
-export type { SnapshotMeta, SnapshotEntry } from "./schema";
-export { SnapshotMetaSchema } from "./schema";
+export {
+  SnapshotMetaSchema,
+  type SnapshotMeta,
+  type SnapshotEntry,
+} from "./store";
 export {
   snapshots,
   initSnapshots,

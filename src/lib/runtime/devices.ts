@@ -1,7 +1,14 @@
 import { Effect } from "effect";
 import type { SerialConfig } from "../transport/serial.schema";
 import type { PortInfo } from "../transport/serial.schema";
-import { getSettings, setActivePorts, updateSetting } from "../settings/store";
+import { getSettings } from "../settings/store";
+import {
+  getActivePorts,
+  getSavedPorts,
+  removeSavedPorts,
+  setActivePorts,
+  upsertSavedPorts,
+} from "../ports/store";
 import { DeviceService } from "./DeviceService";
 import type { RuntimeCommand } from "./RuntimeService";
 import { enqueueRuntimeCommand, runRuntimeEffect } from "./store";
@@ -11,7 +18,7 @@ const normalizePaths = (paths: string[]): string[] =>
 
 const resolveSerialConfig = (path: string): SerialConfig => {
   const settings = getSettings();
-  const saved = settings.savedPorts.find((entry) => entry.path === path);
+  const saved = getSavedPorts().find((entry) => entry.path === path);
   return saved?.lastConfig ?? settings.defaultSerialConfig;
 };
 
@@ -34,12 +41,7 @@ export async function listPorts(): Promise<PortInfo[]> {
 export async function addToSaved(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
   if (normalized.length === 0) return;
-  const settings = getSettings();
-  await setActivePorts([...settings.activePorts, ...normalized]);
-
-  const existing = new Map(
-    settings.savedPorts.map((entry) => [entry.path, entry]),
-  );
+  const existing = new Map(getSavedPorts().map((entry) => [entry.path, entry]));
   for (const path of normalized) {
     if (!existing.has(path)) {
       existing.set(path, {
@@ -49,7 +51,8 @@ export async function addToSaved(paths: string[]): Promise<void> {
     }
   }
 
-  await updateSetting("savedPorts", Array.from(existing.values()));
+  await upsertSavedPorts(Array.from(existing.values()));
+  await setActivePorts([...getActivePorts(), ...normalized]);
 }
 
 export async function removeSaved(paths: string[]): Promise<void> {
@@ -59,13 +62,9 @@ export async function removeSaved(paths: string[]): Promise<void> {
     Array.from(normalized.values()).map((path) => enqueueDisconnect(path)),
   );
 
-  const settings = getSettings();
-  await updateSetting(
-    "savedPorts",
-    settings.savedPorts.filter((entry) => !normalized.has(entry.path)),
-  );
+  await removeSavedPorts(Array.from(normalized.values()));
   await setActivePorts(
-    settings.activePorts.filter((path) => !normalized.has(path)),
+    getActivePorts().filter((path) => !normalized.has(path)),
   );
 }
 
@@ -77,7 +76,7 @@ export async function activatePorts(paths: string[]): Promise<void> {
 export async function deactivatePorts(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
   await Promise.all(normalized.map((path) => enqueueDisconnect(path)));
-  const current = getSettings().activePorts;
+  const current = getActivePorts();
   await setActivePorts(current.filter((path) => !normalized.includes(path)));
 }
 

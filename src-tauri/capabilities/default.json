@@ -7,13 +7,7 @@
     "core:default",
     "opener:default",
     "store:default",
-    "fs:default",
-    {
-      "identifier": "fs:scope",
-      "allow": [
-        { "path": "$APPDATA/snapshots" },
-        { "path": "$APPDATA/snapshots/**" }
-      ]
-    }
+    "sql:default",
+    "sql:allow-execute"
   ]
 }
