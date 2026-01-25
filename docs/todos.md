@@ -32,6 +32,19 @@ Application needs persistent config file for:
 **Format**: JSON or TOML in standard config directory
 **Location**: Use Tauri's app data directory
 
+## UI/Runtime
+
+### App bootstrap error handling
+
+- **Issue**: app stays blank if settings init throws
+- **Action**: use try/finally and render error component on failure
+- [ ] Add bootstrap error UI for settings init
+
+### Serial port filtering ownership
+
+- **Decision**: list all ports in Tauri; UI filters visibility only
+- **Action**: add simple UI table filter later (name/vid/pid)
+
 ## State Management
 
 ### Settings lock during RUNNING/ACQUIRING

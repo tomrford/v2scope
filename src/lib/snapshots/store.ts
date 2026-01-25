@@ -40,8 +40,12 @@ export async function initSnapshots(): Promise<void> {
   for (const entry of entries) {
     if (!entry.isDirectory) continue;
 
+    const dirName = entry.name;
+    if (!dirName || !/^[0-9]+$/.test(dirName)) continue;
+
     try {
-      const metaPath = `${SNAPSHOTS_DIR}/${entry.name}/metadata.json`;
+      const metaPath = `${SNAPSHOTS_DIR}/${dirName}/metadata.json`;
+      if (!(await exists(metaPath, base))) continue;
       const metaBytes = await readFile(metaPath, base);
       const metaRaw = JSON.parse(new TextDecoder().decode(metaBytes));
       const parsed = SnapshotMetaSchema.safeParse(metaRaw);
@@ -94,7 +98,11 @@ export async function persistSnapshot(id: number): Promise<void> {
   );
   await writeFile(
     `${dir}/data.bin`,
-    new Uint8Array(entry.data.buffer, entry.data.byteOffset, entry.data.byteLength),
+    new Uint8Array(
+      entry.data.buffer,
+      entry.data.byteOffset,
+      entry.data.byteLength,
+    ),
     base,
   );
 

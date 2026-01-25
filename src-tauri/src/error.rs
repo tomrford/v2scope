@@ -16,6 +16,9 @@ pub enum SerialError {
     #[error("timeout")]
     Timeout,
 
+    #[error("crc mismatch")]
+    CrcMismatch,
+
     #[error("io error: {message}")]
     IoError { message: String },
 

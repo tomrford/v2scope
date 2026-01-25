@@ -6,11 +6,7 @@ import {
   fromCodecError,
   ProtocolError,
 } from "../errors";
-import type {
-  PortFilter,
-  PortInfo,
-  SerialConfig,
-} from "../transport/serial.schema";
+import type { PortInfo, SerialConfig } from "../transport/serial.schema";
 import { DeviceHandle } from "./DeviceHandle";
 import {
   type DeviceInfo,
@@ -67,9 +63,7 @@ import {
  * DeviceService shape - serial + protocol operations.
  */
 export interface DeviceServiceShape {
-  readonly listPorts: (
-    filter?: PortFilter,
-  ) => Effect.Effect<PortInfo[], SerialError>;
+  readonly listPorts: () => Effect.Effect<PortInfo[], SerialError>;
   readonly openDevice: (
     path: string,
     config: SerialConfig,
@@ -210,7 +204,7 @@ const makeProtocolRequest = <T>(
  * Live implementation of DeviceService.
  */
 export const DeviceServiceLive = Layer.succeed(DeviceService, {
-  listPorts: (filter) => Transport.listPorts(filter),
+  listPorts: () => Transport.listPorts(),
 
   openDevice: (path, config) =>
     Transport.openDevice(path, config).pipe(

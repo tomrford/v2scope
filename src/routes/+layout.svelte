@@ -1,15 +1,16 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { initSettings } from "$lib/settings";
+	import './layout.css';
+	import { onMount } from "svelte";
+	import { initSettings } from "$lib/settings";
 
-  let ready = false;
+	let ready = false;
 
-  onMount(async () => {
-    await initSettings();
-    ready = true;
-  });
+	onMount(async () => {
+		await initSettings();
+		ready = true;
+	});
 </script>
 
 {#if ready}
-  <slot />
+	<slot></slot>
 {/if}

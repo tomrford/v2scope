@@ -24,14 +24,6 @@ pub struct SerialConfig {
     pub read_timeout_ms: u64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PortFilter {
-    pub vid: Option<u16>,
-    pub pid: Option<u16>,
-    pub name_substr: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortInfo {
@@ -83,15 +75,8 @@ fn registry() -> &'static Registry {
 }
 
 #[tauri::command]
-pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, SerialError> {
+pub fn list_ports() -> Result<Vec<PortInfo>, SerialError> {
     let ports = serialport::available_ports()?;
-    let name_filter = filters
-        .as_ref()
-        .and_then(|filter| filter.name_substr.as_ref())
-        .map(|value| value.to_lowercase());
-    let vid_filter = filters.as_ref().and_then(|filter| filter.vid);
-    let pid_filter = filters.as_ref().and_then(|filter| filter.pid);
-
     let mut out = Vec::new();
     for port in ports {
         let (vid, pid, manufacturer, product, serial_number, port_type) = match &port.port_type {
@@ -109,32 +94,6 @@ pub fn list_ports(filters: Option<PortFilter>) -> Result<Vec<PortInfo>, SerialEr
             SerialPortType::PciPort => (None, None, None, None, None, "pci".to_string()),
             SerialPortType::Unknown => (None, None, None, None, None, "unknown".to_string()),
         };
-
-        if let Some(vid_filter) = vid_filter {
-            if vid != Some(vid_filter) {
-                continue;
-            }
-        }
-        if let Some(pid_filter) = pid_filter {
-            if pid != Some(pid_filter) {
-                continue;
-            }
-        }
-        if let Some(name_filter) = name_filter.as_ref() {
-            let matches = port.port_name.to_lowercase().contains(name_filter)
-                || manufacturer
-                    .as_ref()
-                    .is_some_and(|v| v.to_lowercase().contains(name_filter))
-                || product
-                    .as_ref()
-                    .is_some_and(|v| v.to_lowercase().contains(name_filter))
-                || serial_number
-                    .as_ref()
-                    .is_some_and(|v| v.to_lowercase().contains(name_filter));
-            if !matches {
-                continue;
-            }
-        }
 
         out.push(PortInfo {
             path: port.port_name,
@@ -253,7 +212,7 @@ fn read_frame(port: &mut dyn SerialPort) -> Result<Vec<u8>, SerialError> {
         let crc = buf[payload_end];
         let calc = crc8(&buf[..payload_end]);
         if crc != calc {
-            continue;
+            return Err(SerialError::CrcMismatch);
         }
 
         return Ok(buf[..payload_end].to_vec());

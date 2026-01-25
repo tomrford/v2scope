@@ -1,6 +1,8 @@
 import { Effect, Exit, Layer, ManagedRuntime } from "effect";
 import { DeviceServiceLive } from "./DeviceService";
 import { DeviceManagerLive } from "./DeviceManager";
+import type { PollingConfig } from "./RuntimeService";
+import { RuntimeServiceLive } from "./RuntimeService";
 
 // Re-exports
 export { DeviceHandle } from "./DeviceHandle";
@@ -10,6 +12,14 @@ export {
   DeviceManagerLive,
   type ConnectedDevice,
 } from "./DeviceManager";
+export {
+  RuntimeService,
+  RuntimeServiceLive,
+  type PollingConfig,
+  type RuntimeCommand,
+  type RuntimeDeviceError,
+  type RuntimeEvent,
+} from "./RuntimeService";
 
 /**
  * DeviceManager layer with DeviceService dependency wired in.
@@ -25,6 +35,21 @@ export const ServicesLive = Layer.merge(
   DeviceServiceLive,
   DeviceManagerWithDeps,
 );
+
+/**
+ * Runtime services layer with event loop.
+ */
+export const RuntimeServicesLive = (config: PollingConfig) =>
+  Layer.merge(
+    ServicesLive,
+    RuntimeServiceLive(config).pipe(Layer.provide(ServicesLive)),
+  );
+
+/**
+ * Application runtime with all services + event loop.
+ */
+export const makeRuntime = (config: PollingConfig) =>
+  ManagedRuntime.make(RuntimeServicesLive(config));
 
 /**
  * Application runtime with all services.

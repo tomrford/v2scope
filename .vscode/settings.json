@@ -16,5 +16,8 @@
     "**/result/**": true,
     "**/.direnv/**": true,
     "**/.svelte-kit/**": true
+  },
+  "files.associations": {
+    "*.css": "tailwindcss"
   }
 }

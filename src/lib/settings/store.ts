@@ -61,6 +61,7 @@ export const pollingConfig = derived(settings, (s) => ({
   stateHz: s.statePollingHz,
   frameHz: s.framePollingHz,
   frameTimeoutMs: s.frameTimeoutMs,
+  crcRetryAttempts: s.crcRetryAttempts,
 }));
 export const snapshotConfig = derived(settings, (s) => ({
   autoSave: s.snapshotAutoSave,

@@ -38,9 +38,10 @@ export const Runtime = ManagedRuntime.make(MainLayer);
 Built-in composable policies:
 
 - `Schedule.spaced("50ms")` - fixed interval repeating (20Hz polling)
-- `Schedule.linear("5ms")` - linear backoff (5ms, 10ms, 15ms, ...)
-- `Schedule.recurs(3)` - max attempts
+- `Schedule.recurs(2)` - max 3 attempts total (no backoff)
 - `Schedule.whileInput(pred)` - conditional continuation
+
+**Current policy**: no backoff; retries are immediate and limited to CRC/Decode errors only.
 
 ### Error Handling
 
@@ -75,6 +76,7 @@ interface SerialPortService {
 - `SerialError.Timeout` - no response within deadline
 - `SerialError.Disconnected` - port no longer available
 - `SerialError.IoError` - general I/O failure
+- `SerialError.CrcMismatch` - response CRC invalid (surfaced by Rust transport)
 
 **Retry policy**: None at this layer (delegated to higher layers).
 
@@ -138,13 +140,13 @@ interface DeviceService {
 
 - `ProtocolError.BadLen` - invalid payload length
 - `ProtocolError.BadParam` - invalid parameter value
-- `ProtocolError.BadState` - operation not valid in current state
 - `ProtocolError.Range` - index out of range
 - `ProtocolError.NotReady` - snapshot not available
-- `ProtocolError.Timeout` - no response (from serial layer)
-- `ProtocolError.CrcMismatch` - response CRC invalid (not surfaced by current Rust serial layer; invalid frames are dropped and appear as timeouts)
+- `ProtocolError.DecodeError` - malformed/invalid response payload
 
-**Retry policy**: Linear backoff starting at 5ms (5ms, 10ms, 15ms). Max 3 retries. Configurable per-message-type (see below).
+**CRC note**: CRC mismatch is not surfaced by the current transport layer; to enable CRC-specific retry, Rust transport must expose a dedicated error (or map CRC to `DecodeError`).
+
+**Retry policy**: Retry only on CRC/Decode errors, max 3 attempts total, no backoff. All other errors fail immediately.
 
 ### DeviceManager
 
@@ -220,8 +222,9 @@ interface PollingService {
 **Failure handling for polling**:
 
 - Live polling should **drop** values on failure, not delay
-- No retry/backoff for polling requests
-- Timeout = skip this poll cycle, continue next
+- State polling: retry only on CRC/Decode errors (max 3 attempts), no backoff
+- Frame polling: no retry; CRC/Decode errors are dropped (missed samples)
+- Transport/protocol errors: fail immediately
 - Disconnect detection: multiple consecutive timeouts → mark device inactive
 
 ### SnapshotCacheService
@@ -314,9 +317,6 @@ interface AppConfig {
 
   // Serial history
   recentPorts: RecentPort[];
-
-  // Per-port settings
-  portSettings: Record<string, SerialConfig>;
 }
 ```
 
@@ -324,24 +324,25 @@ interface AppConfig {
 
 ## Retry Policies by Message Type
 
-| Message          | Retry    | Strategy              | Notes                      |
-| ---------------- | -------- | --------------------- | -------------------------- |
-| list_ports       | No       | -                     | Just show what's available |
-| open_device      | Yes      | Linear 5ms, max 3     | Port may be briefly busy   |
-| close_device     | No       | -                     | Best effort                |
-| GET_INFO         | Yes      | Linear 5ms, max 3     | Critical for handshake     |
-| GET_STATE        | **Drop** | -                     | Polling; skip on failure   |
-| SET_STATE        | Yes      | Linear 5ms, max 3     | User action                |
-| GET_FRAME        | **Drop** | -                     | Polling; skip on failure   |
-| GET*SNAPSHOT*\*  | Yes      | **Reduce chunk size** | See adaptive download      |
-| GET_VAR_LIST     | Yes      | Linear 5ms, max 3     | One-time during connect    |
-| SET\_\* commands | Yes      | Linear 5ms, max 3     | User actions               |
-| TRIGGER          | Yes      | Linear 5ms, max 3     | User action                |
+| Message          | Retry    | Strategy              | Notes                         |
+| ---------------- | -------- | --------------------- | ----------------------------- |
+| list_ports       | No       | -                     | Just show what's available    |
+| open_device      | No       | -                     | Transport errors fail fast    |
+| close_device     | No       | -                     | Best effort                   |
+| GET_INFO         | Yes      | CRC only, max 3       | Critical for handshake        |
+| GET_STATE        | Yes      | CRC only, max 3       | Polling; fail fast on non-CRC |
+| SET_STATE        | Yes      | CRC only, max 3       | User action                   |
+| GET_FRAME        | **Drop** | CRC only, no retry    | Polling; skip on CRC          |
+| GET*SNAPSHOT*\*  | Yes      | **Reduce chunk size** | See adaptive download         |
+| GET_VAR_LIST     | Yes      | CRC only, max 3       | One-time during connect       |
+| SET\_\* commands | Yes      | CRC only, max 3       | User actions                  |
+| TRIGGER          | Yes      | CRC only, max 3       | User action                   |
 
 **Key distinction**:
 
-- **Timeout** (no response): treat as transient, may retry
+- **CRC/Decode errors**: retry up to 3 attempts (except frame polling)
 - **Error response** (device replied with error code): do not retry, surface to UI
+- **Transport errors** (SerialError): do not retry
 
 ## Svelte Store Integration
 

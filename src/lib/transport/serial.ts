@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { parseSerialError, type SerialError } from "../errors";
-import type { PortFilter, PortInfo, SerialConfig } from "./serial.schema";
+import type { PortInfo, SerialConfig } from "./serial.schema";
 
 const invoke = <A>(
   cmd: string,
@@ -12,10 +12,8 @@ const invoke = <A>(
     catch: parseSerialError,
   });
 
-export const listPorts = (
-  filter?: PortFilter,
-): Effect.Effect<PortInfo[], SerialError> =>
-  invoke<PortInfo[]>("list_ports", { filters: filter });
+export const listPorts = (): Effect.Effect<PortInfo[], SerialError> =>
+  invoke<PortInfo[]>("list_ports", {});
 
 export const openDevice = (
   path: string,

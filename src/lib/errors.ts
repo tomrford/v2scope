@@ -7,6 +7,7 @@ export type SerialError = Data.TaggedEnum<{
   PortBusy: { readonly path: string };
   InvalidHandle: { readonly handleId: number };
   Timeout: {};
+  CrcMismatch: {};
   IoError: { readonly message: string };
   InvalidConfig: { readonly message: string };
   PayloadTooLarge: {};
@@ -82,6 +83,8 @@ export const parseSerialError = (e: unknown): SerialError => {
         });
       case "Timeout":
         return SerialError.Timeout();
+      case "CrcMismatch":
+        return SerialError.CrcMismatch();
       case "IoError":
         return SerialError.IoError({
           message: String(rustErr.data?.message ?? "unknown io error"),

@@ -9,13 +9,6 @@ export const SerialConfigSchema = z.object({
 });
 export type SerialConfig = z.infer<typeof SerialConfigSchema>;
 
-export const PortFilterSchema = z.object({
-  vid: z.number().int().min(0).max(0xffff).optional(),
-  pid: z.number().int().min(0).max(0xffff).optional(),
-  nameSubstr: z.string().min(1).optional(),
-});
-export type PortFilter = z.infer<typeof PortFilterSchema>;
-
 export const PortInfoSchema = z.object({
   path: z.string(),
   vid: z.number().int().nullable(),

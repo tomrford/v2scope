@@ -4,6 +4,7 @@ export const DEFAULT_SETTINGS: Settings = {
   statePollingHz: 20,
   framePollingHz: 10,
   frameTimeoutMs: 100,
+  crcRetryAttempts: 3,
   liveBufferDurationS: 10,
   defaultSerialConfig: {
     baudRate: 115200,
@@ -12,7 +13,6 @@ export const DEFAULT_SETTINGS: Settings = {
     stopBits: "One",
     readTimeoutMs: 100,
   },
-  portSettings: {},
   recentPorts: [],
   snapshotAutoSave: false,
   snapshotGcDays: "never",
