@@ -44,10 +44,7 @@ export async function addToSaved(paths: string[]): Promise<void> {
   const existing = new Map(getSavedPorts().map((entry) => [entry.path, entry]));
   for (const path of normalized) {
     if (!existing.has(path)) {
-      existing.set(path, {
-        path,
-        lastConfig: resolveSerialConfig(path),
-      });
+      existing.set(path, { path });
     }
   }
 

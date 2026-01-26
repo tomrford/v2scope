@@ -1,17 +1,13 @@
 <script lang="ts">
   import * as Table from "$lib/components/ui/table/index.js";
-  import { Input } from "$lib/components/ui/input/index.js";
   import {
     createSvelteTable,
     FlexRender,
     getCoreRowModel,
-    getFilteredRowModel,
     renderComponent,
     type ColumnDef,
-    type ColumnFiltersState,
   } from "$lib/components/ui/data-table/index.js";
   import type { AvailablePortRow } from "./types.js";
-  import DeviceStatusBadge from "./device-status-badge.svelte";
   import SelectCell from "./select-cell.svelte";
 
   type Props = {
@@ -22,11 +18,7 @@
 
   let { ports, selectedPaths, onSelectionChange }: Props = $props();
 
-  let columnFilters: ColumnFiltersState = $state([]);
-
-  function toggleSelection(path: string, alreadySaved: boolean) {
-    if (alreadySaved) return;
-
+  function toggleSelection(path: string) {
     const current = new Set(selectedPaths);
     if (current.has(path)) {
       current.delete(path);
@@ -46,22 +38,10 @@
       header: "",
       cell: ({ row }) => {
         const selected = isSelected(row.original.portInfo.path);
-        const disabled = row.original.alreadySaved;
         return renderComponent(SelectCell, {
           selected,
-          disabled,
-          onclick: () =>
-            toggleSelection(row.original.portInfo.path, row.original.alreadySaved),
-        });
-      },
-    },
-    {
-      id: "status",
-      header: "Status",
-      cell: ({ row }) => {
-        if (!row.original.alreadySaved) return "";
-        return renderComponent(DeviceStatusBadge, {
-          status: row.original.savedStatus ?? "unknown",
+          disabled: false,
+          onclick: () => toggleSelection(row.original.portInfo.path),
         });
       },
     },
@@ -69,26 +49,6 @@
       accessorKey: "portInfo.path",
       header: "Path",
       cell: ({ row }) => row.original.portInfo.path,
-      filterFn: (row, _columnId, filterValue: string) => {
-        const searchLower = filterValue.toLowerCase();
-        const info = row.original.portInfo;
-        return (
-          info.path.toLowerCase().includes(searchLower) ||
-          (info.product?.toLowerCase().includes(searchLower) ?? false) ||
-          (info.manufacturer?.toLowerCase().includes(searchLower) ?? false)
-        );
-      },
-    },
-    {
-      id: "vidpid",
-      header: "VID/PID",
-      cell: ({ row }) => {
-        const { vid, pid } = row.original.portInfo;
-        if (vid === null && pid === null) return "—";
-        const vidStr = vid?.toString(16).toUpperCase().padStart(4, "0") ?? "????";
-        const pidStr = pid?.toString(16).toUpperCase().padStart(4, "0") ?? "????";
-        return `${vidStr}:${pidStr}`;
-      },
     },
     {
       id: "name",
@@ -100,56 +60,27 @@
     },
   ];
 
-  const table = createSvelteTable({
-    get data() {
-      return ports;
-    },
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    onColumnFiltersChange: (updater) => {
-      if (typeof updater === "function") {
-        columnFilters = updater(columnFilters);
-      } else {
-        columnFilters = updater;
-      }
-    },
-    state: {
-      get columnFilters() {
-        return columnFilters;
-      },
-    },
-  });
-
-  function handleFilterInput(e: Event) {
-    const value = (e.target as HTMLInputElement).value;
-    table.getColumn("portInfo.path")?.setFilterValue(value);
-  }
+  // Use $derived to recreate table when ports changes
+  const table = $derived(
+    createSvelteTable({
+      data: ports,
+      columns,
+      getCoreRowModel: getCoreRowModel(),
+    }),
+  );
 
   function getRowClass(row: AvailablePortRow): string {
-    if (row.alreadySaved) return "opacity-50 cursor-not-allowed";
     if (isSelected(row.portInfo.path)) return "bg-muted";
     return "cursor-pointer";
   }
 
   function handleRowClick(row: AvailablePortRow) {
-    if (!row.alreadySaved) {
-      toggleSelection(row.portInfo.path, row.alreadySaved);
-    }
+    toggleSelection(row.portInfo.path);
   }
 </script>
 
-<div class="flex flex-col gap-4">
-  <div class="flex items-center gap-2">
-    <Input
-      placeholder="Search ports..."
-      value={(table.getColumn("portInfo.path")?.getFilterValue() as string) ?? ""}
-      oninput={handleFilterInput}
-      class="max-w-sm"
-    />
-  </div>
-
-  <div class="rounded-md border">
+<div class="flex h-full flex-col gap-3">
+  <div class="flex-1 overflow-auto rounded-md border">
     <Table.Root>
       <Table.Header>
         {#each table.getHeaderGroups() as headerGroup}
@@ -193,8 +124,7 @@
     </Table.Root>
   </div>
 
-  <div class="text-muted-foreground text-sm">
-    {selectedPaths.length} selected of {ports.filter((p) => !p.alreadySaved).length}
-    available
+  <div class="text-sm text-muted-foreground">
+    {selectedPaths.length} selected of {ports.length} available
   </div>
 </div>

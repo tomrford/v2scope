@@ -19,12 +19,11 @@ export type SavedDeviceRow = {
 export type DeviceStatus = "connected" | "error" | "deactivated" | "unknown";
 
 /**
- * Row data for the available ports table (add devices modal).
+ * Row data for the available ports table.
+ * Only shows ports not already saved.
  */
 export type AvailablePortRow = {
   portInfo: PortInfo;
-  alreadySaved: boolean;
-  savedStatus?: DeviceStatus;
 };
 
 /**
@@ -46,7 +45,8 @@ export function getDeviceStatus(
  * Uses device name from GET_INFO if connected, otherwise falls back to path.
  */
 export function getDeviceDisplayName(row: SavedDeviceRow): string {
-  if (row.session?.info?.deviceName) {
+  const status = getDeviceStatus(row.session, row.isActive);
+  if (status === "connected" && row.session?.info?.deviceName) {
     return row.session.info.deviceName;
   }
   return row.port.path;

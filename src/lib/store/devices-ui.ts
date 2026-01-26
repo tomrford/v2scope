@@ -7,7 +7,6 @@ import type {
   AvailablePortRow,
   SavedDeviceRow,
 } from "../components/devices-table/types";
-import { getDeviceStatus } from "../components/devices-table/types";
 
 type AvailablePortsStatus = "idle" | "loading" | "ready" | "error";
 
@@ -67,17 +66,10 @@ export const savedDeviceRows = derived(
 export const availablePortRows = derived(
   [availablePortsState, savedDeviceRows],
   ([available, saved]): AvailablePortRow[] => {
-    const savedMap = new Map(saved.map((row) => [row.port.path, row]));
-    return available.ports.map((portInfo) => {
-      const savedRow = savedMap.get(portInfo.path);
-      return {
-        portInfo,
-        alreadySaved: Boolean(savedRow),
-        savedStatus: savedRow
-          ? getDeviceStatus(savedRow.session, savedRow.isActive)
-          : undefined,
-      };
-    });
+    const savedPaths = new Set(saved.map((row) => row.port.path));
+    return available.ports
+      .filter((portInfo) => !savedPaths.has(portInfo.path))
+      .map((portInfo) => ({ portInfo }));
   },
 );
 

@@ -1,14 +1,12 @@
 <script lang="ts">
   import { get } from "svelte/store";
-  import * as Dialog from "$lib/components/ui/dialog";
   import { Button } from "$lib/components/ui/button";
   import { Spinner } from "$lib/components/ui/spinner";
-  import SettingsModal from "$lib/components/settings-modal.svelte";
+  import * as Item from "$lib/components/ui/item";
   import {
     AvailablePortsTable,
     SavedDevicesTable,
     getDeviceStatus,
-    type SavedDeviceRow,
   } from "$lib/components/devices-table";
   import {
     availablePortRows,
@@ -18,34 +16,12 @@
     savedDeviceRows,
     selectedAvailablePaths,
   } from "$lib/store/devices-ui";
-  import { activePorts, removeSavedPorts, setActivePorts } from "$lib/ports";
-  import {
-    activatePorts,
-    deactivatePorts,
-    resyncPorts,
-    addToSaved,
-  } from "$lib/runtime/devices";
+  import { activatePorts, resyncPorts, addToSaved } from "$lib/runtime/devices";
+  import { onMount } from "svelte";
 
-  let addModalOpen = $state(false);
-  let settingsOpen = $state(false);
-  let settingsSection = $state<"serial" | null>(null);
-
-  $effect(() => {
-    if (!settingsOpen) {
-      settingsSection = null;
-    }
+  onMount(() => {
+    void refreshAvailablePorts();
   });
-
-  $effect(() => {
-    if (!addModalOpen) {
-      clearAvailableSelection();
-    }
-  });
-
-  async function openAddModal() {
-    addModalOpen = true;
-    await refreshAvailablePorts();
-  }
 
   async function handleRefreshAvailable() {
     await refreshAvailablePorts();
@@ -61,7 +37,6 @@
 
     await addToSaved(paths);
     clearAvailableSelection();
-    addModalOpen = false;
 
     try {
       await activatePorts(paths);
@@ -92,169 +67,107 @@
       console.info("resync failed", error);
     }
   }
-
-  function openSerialSettings() {
-    settingsSection = "serial";
-    settingsOpen = true;
-  }
-
-  function handleShowInfo(row: SavedDeviceRow) {
-    console.info("show device info", row);
-  }
-
-  function handleEditSettings(row: SavedDeviceRow) {
-    console.info("edit serial settings", row);
-    openSerialSettings();
-  }
-
-  async function handleRetryConnect(row: SavedDeviceRow) {
-    try {
-      await resyncPorts([row.port.path]);
-    } catch (error) {
-      console.info("retry connect failed", error);
-    }
-  }
-
-  async function handleToggleActive(row: SavedDeviceRow) {
-    const current = new Set(get(activePorts));
-    if (row.isActive) {
-      current.delete(row.port.path);
-      await setActivePorts(Array.from(current));
-      try {
-        await deactivatePorts([row.port.path]);
-      } catch (error) {
-        console.info("disconnect failed", error);
-      }
-    } else {
-      current.add(row.port.path);
-      await setActivePorts(Array.from(current));
-      try {
-        await activatePorts([row.port.path]);
-      } catch (error) {
-        console.info("connect failed", error);
-      }
-    }
-  }
-
-  async function handleRemove(row: SavedDeviceRow) {
-    const path = row.port.path;
-    await removeSavedPorts([path]);
-    await setActivePorts(get(activePorts).filter((entry) => entry !== path));
-  }
 </script>
 
-<div class="flex flex-col gap-6">
-  <header
-    class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between"
-  >
+<div class="flex min-h-0 flex-1 flex-col gap-6">
+  <header>
     <div class="space-y-1">
       <h1 class="text-xl font-semibold text-foreground">Devices</h1>
       <p class="text-sm text-muted-foreground">
         Manage saved devices, monitor status, and control activation.
       </p>
     </div>
-    <div class="flex flex-wrap items-center gap-2">
-      <Button onclick={openAddModal}>Add Devices</Button>
-      <Button variant="outline" onclick={handleResyncAll}>Resync All</Button>
-      <Button variant="outline" onclick={openSerialSettings}>
-        Default Serial Settings
-      </Button>
-    </div>
   </header>
 
-  <section class="rounded-xl border border-border/70 bg-card p-4">
-    <div class="mb-4 flex items-center justify-between">
-      <h2 class="text-sm font-medium text-foreground">Saved Devices</h2>
-    </div>
+  <div class="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+    <Item.Root
+      variant="outline"
+      class="flex h-full min-h-0 flex-1 flex-col flex-nowrap items-stretch gap-4"
+    >
+      <Item.Header>
+        <Item.Title>Saved Devices</Item.Title>
+        <Item.Actions>
+          <Button size="sm" variant="outline" onclick={handleResyncAll}
+            >Resync All</Button
+          >
+        </Item.Actions>
+      </Item.Header>
+      <Item.Content class="min-h-0 flex-1 overflow-hidden">
+        <SavedDevicesTable devices={$savedDeviceRows} />
+      </Item.Content>
+    </Item.Root>
 
-    <SavedDevicesTable
-      devices={$savedDeviceRows}
-      onShowInfo={handleShowInfo}
-      onEditSettings={handleEditSettings}
-      onRetryConnect={handleRetryConnect}
-      onToggleActive={handleToggleActive}
-      onRemove={handleRemove}
-    />
-  </section>
-</div>
-
-<Dialog.Root bind:open={addModalOpen}>
-  <Dialog.Content class="max-h-[90vh] max-w-4xl overflow-y-auto">
-    <Dialog.Header>
-      <Dialog.Title>Add Devices</Dialog.Title>
-      <Dialog.Description>
-        Select one or more ports to save and connect.
-      </Dialog.Description>
-    </Dialog.Header>
-
-    <div class="py-4">
-      {#if $availablePortsState.status === "loading"}
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner class="size-4" />
-          Listing devices...
-        </div>
-      {:else if $availablePortsState.status === "error"}
-        <div
-          class="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-4"
-        >
-          <div class="text-sm text-destructive">Failed to list devices.</div>
-          {#if $availablePortsState.error}
-            <div class="text-xs text-destructive/80">
-              {$availablePortsState.error}
+    <Item.Root
+      variant="outline"
+      class="flex h-full min-h-0 flex-1 flex-col flex-nowrap items-stretch gap-4"
+    >
+      <Item.Header>
+        <Item.Title>Available Ports</Item.Title>
+        <Item.Actions>
+          <Button size="sm" variant="outline" onclick={handleRefreshAvailable}
+            >Refresh</Button
+          >
+          <Button
+            size="sm"
+            onclick={handleAddSelected}
+            disabled={$selectedAvailablePaths.length === 0}
+          >
+            Add
+          </Button>
+        </Item.Actions>
+      </Item.Header>
+      <Item.Content class="min-h-0 flex-1 overflow-hidden">
+        {#if $availablePortsState.status === "loading"}
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner class="size-4" />
+            Listing devices...
+          </div>
+        {:else if $availablePortsState.status === "error"}
+          <div
+            class="flex flex-col gap-3 rounded-md border border-destructive/40 bg-destructive/10 p-4"
+          >
+            <div class="text-sm text-destructive">Failed to list devices.</div>
+            {#if $availablePortsState.error}
+              <div class="text-xs text-destructive/80">
+                {$availablePortsState.error}
+              </div>
+            {/if}
+            <div>
+              <Button
+                variant="outline"
+                size="sm"
+                onclick={handleRefreshAvailable}
+              >
+                Retry
+              </Button>
             </div>
-          {/if}
-          <div>
+          </div>
+        {:else if $availablePortsState.status === "ready" && $availablePortRows.length === 0}
+          <div
+            class="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-sm text-muted-foreground"
+          >
+            <div>No devices found.</div>
             <Button
               variant="outline"
               size="sm"
               onclick={handleRefreshAvailable}
             >
-              Retry
+              Refresh
             </Button>
           </div>
-        </div>
-      {:else if $availablePortsState.status === "ready" && $availablePortRows.length === 0}
-        <div
-          class="flex flex-col items-center gap-3 rounded-md border border-dashed p-8 text-sm text-muted-foreground"
-        >
-          <div>No devices found.</div>
-          <Button variant="outline" size="sm" onclick={handleRefreshAvailable}>
-            Refresh
-          </Button>
-        </div>
-      {:else if $availablePortsState.status === "ready"}
-        <AvailablePortsTable
-          ports={$availablePortRows}
-          selectedPaths={$selectedAvailablePaths}
-          onSelectionChange={handleSelectionChange}
-        />
-      {:else}
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Spinner class="size-4" />
-          Listing devices...
-        </div>
-      {/if}
-    </div>
-
-    <Dialog.Footer
-      class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
-    >
-      <div class="text-xs text-muted-foreground">
-        {$selectedAvailablePaths.length} selected
-      </div>
-      <div class="flex gap-2">
-        <Button variant="outline" onclick={handleRefreshAvailable}>
-          Refresh
-        </Button>
-        <Button
-          onclick={handleAddSelected}
-          disabled={$selectedAvailablePaths.length === 0}
-        >
-          Add
-        </Button>
-      </div>
-    </Dialog.Footer>
-  </Dialog.Content>
-</Dialog.Root>
-
-<SettingsModal bind:open={settingsOpen} initialSection={settingsSection} />
+        {:else if $availablePortsState.status === "ready"}
+          <AvailablePortsTable
+            ports={$availablePortRows}
+            selectedPaths={$selectedAvailablePaths}
+            onSelectionChange={handleSelectionChange}
+          />
+        {:else}
+          <div class="flex items-center gap-2 text-sm text-muted-foreground">
+            <Spinner class="size-4" />
+            Listing devices...
+          </div>
+        {/if}
+      </Item.Content>
+    </Item.Root>
+  </div>
+</div>
