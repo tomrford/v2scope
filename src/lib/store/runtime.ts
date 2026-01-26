@@ -10,7 +10,6 @@ import type {
   TriggerResponse,
 } from "../protocol";
 import type {
-  PollingConfig,
   RuntimeCommand,
   RuntimeDeviceError,
   RuntimeEvent,
@@ -18,7 +17,13 @@ import type {
 import type { DeviceManager } from "../runtime/DeviceManager";
 import type { DeviceService } from "../runtime/DeviceService";
 import { RuntimeService } from "../runtime/RuntimeService";
-import { makeRuntime } from "../runtime";
+
+type RuntimeInstance = {
+  runPromise: <A, E>(
+    effect: Effect.Effect<A, E, DeviceService | DeviceManager | RuntimeService>,
+  ) => Promise<A>;
+  disposeEffect: Effect.Effect<void, never>;
+};
 
 export type DeviceConnectionStatus = "connected" | "disconnected";
 
@@ -62,6 +67,9 @@ export const connectedSessions = derived(deviceSessions, (sessions) =>
     (session) => session.status === "connected",
   ),
 );
+
+let frameTickSeq = 0;
+export const frameTick = writable(0);
 
 const compareInfo = (baseline: DeviceInfo, other: DeviceInfo): string[] => {
   const mismatches: string[] = [];
@@ -180,6 +188,11 @@ const applyEvent = (event: RuntimeEvent): void => {
       }));
       return;
     }
+    case "frameTick": {
+      frameTickSeq += 1;
+      frameTick.set(frameTickSeq);
+      return;
+    }
     case "frameCleared": {
       updateSession(event.path, (session) => ({
         ...session,
@@ -219,7 +232,7 @@ const applyEvent = (event: RuntimeEvent): void => {
   }
 };
 
-let runtime: ReturnType<typeof makeRuntime> | null = null;
+let runtime: RuntimeInstance | null = null;
 let eventLoopPromise: Promise<never> | null = null;
 
 const eventLoop = Effect.flatMap(RuntimeService, (service) =>
@@ -255,13 +268,15 @@ const bootstrapSessions = Effect.flatMap(RuntimeService, (service) =>
   ),
 );
 
-export async function startRuntimeStores(config: PollingConfig): Promise<void> {
+export async function startRuntimeStores(
+  runtimeInstance: RuntimeInstance,
+): Promise<void> {
   if (runtime) {
     await stopRuntimeStores();
   }
 
   deviceSessions.set(new Map());
-  runtime = makeRuntime(config);
+  runtime = runtimeInstance;
 
   await runtime.runPromise(bootstrapSessions);
 

@@ -71,6 +71,7 @@ export type RuntimeDeviceError =
 export type RuntimeEvent =
   | { readonly type: "deviceConnected"; readonly device: ConnectedDevice }
   | { readonly type: "deviceDisconnected"; readonly path: string }
+  | { readonly type: "frameTick"; readonly queuedAt: number }
   | {
       readonly type: "deviceError";
       readonly path: string;
@@ -161,11 +162,12 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const deviceManager = yield* DeviceManager;
       const deviceService = yield* DeviceService;
       const sessions = yield* Ref.make(HashMap.empty<string, DeviceSession>());
-      const commandQueueSize = 64;
-      const commands = yield* Queue.sliding<RuntimeCommand>(commandQueueSize);
+      const userQueueSize = 64;
+      const userCommands = yield* Queue.bounded<RuntimeCommand>(userQueueSize);
+      const statePollCommands = yield* Queue.sliding<RuntimeCommand>(1);
+      const framePollCommands = yield* Queue.sliding<RuntimeCommand>(1);
       const events = yield* Queue.unbounded<RuntimeEvent>();
-      const statePollPending = yield* Ref.make(false);
-      const framePollPending = yield* Ref.make(false);
+      const pollTurn = yield* Ref.make<"state" | "frame">("state");
 
       const emit = (event: RuntimeEvent) =>
         Queue.offer(events, event).pipe(Effect.ignore);
@@ -304,7 +306,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               statePollRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
-            ).pipe(Effect.ensuring(Ref.set(statePollPending, false)));
+            );
           case "pollFrame":
             return Effect.gen(function* () {
               const delayMs = Date.now() - cmd.queuedAt;
@@ -327,7 +329,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                 true,
                 (path, frame) => emit({ type: "frameUpdated", path, frame }),
               );
-            }).pipe(Effect.ensuring(Ref.set(framePollPending, false)));
+            });
           case "setState":
             return runOnDevices(
               "setState",
@@ -435,8 +437,50 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
         }
       };
 
+      const takePollImmediate = Effect.gen(function* () {
+        const turn = yield* Ref.get(pollTurn);
+        const first = turn === "state" ? statePollCommands : framePollCommands;
+        const second = turn === "state" ? framePollCommands : statePollCommands;
+
+        const firstResult = yield* Queue.poll(first);
+        if (Option.isSome(firstResult)) {
+          yield* Ref.set(pollTurn, turn === "state" ? "frame" : "state");
+          return firstResult.value;
+        }
+
+        const secondResult = yield* Queue.poll(second);
+        if (Option.isSome(secondResult)) {
+          yield* Ref.set(pollTurn, turn);
+          return secondResult.value;
+        }
+
+        return null;
+      });
+
+      const waitForPoll = Effect.race(
+        Queue.take(statePollCommands).pipe(
+          Effect.map((cmd) => ({ cmd, next: "frame" as const })),
+        ),
+        Queue.take(framePollCommands).pipe(
+          Effect.map((cmd) => ({ cmd, next: "state" as const })),
+        ),
+      ).pipe(
+        Effect.tap((result) => Ref.set(pollTurn, result.next)),
+        Effect.map((result) => result.cmd),
+      );
+
+      const takeCommand = Effect.gen(function* () {
+        const user = yield* Queue.poll(userCommands);
+        if (Option.isSome(user)) return user.value;
+
+        const pollImmediate = yield* takePollImmediate;
+        if (pollImmediate) return pollImmediate;
+
+        return yield* Effect.race(Queue.take(userCommands), waitForPoll);
+      });
+
       const commandWorker = Effect.forever(
-        Queue.take(commands).pipe(Effect.flatMap(handleCommand)),
+        takeCommand.pipe(Effect.flatMap(handleCommand)),
       );
 
       const stateIntervalMs = Math.max(1, Math.floor(1000 / config.stateHz));
@@ -444,10 +488,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
 
       const statePoller = Effect.repeat(
         Effect.gen(function* () {
-          const pending = yield* Ref.get(statePollPending);
-          if (pending) return;
-          yield* Ref.set(statePollPending, true);
-          yield* Queue.offer(commands, {
+          yield* Queue.offer(statePollCommands, {
             type: "pollState",
             queuedAt: Date.now(),
           });
@@ -457,10 +498,8 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
 
       const framePoller = Effect.repeat(
         Effect.gen(function* () {
-          const pending = yield* Ref.get(framePollPending);
-          if (pending) return;
-          yield* Ref.set(framePollPending, true);
-          yield* Queue.offer(commands, {
+          yield* emit({ type: "frameTick", queuedAt: Date.now() });
+          yield* Queue.offer(framePollCommands, {
             type: "pollFrame",
             queuedAt: Date.now(),
           });
@@ -472,8 +511,19 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       yield* Effect.forkScoped(statePoller);
       yield* Effect.forkScoped(framePoller);
 
+      const enqueueCommand = (cmd: RuntimeCommand) => {
+        switch (cmd.type) {
+          case "pollState":
+            return Queue.offer(statePollCommands, cmd).pipe(Effect.ignore);
+          case "pollFrame":
+            return Queue.offer(framePollCommands, cmd).pipe(Effect.ignore);
+          default:
+            return Queue.offer(userCommands, cmd).pipe(Effect.ignore);
+        }
+      };
+
       return {
-        enqueue: (cmd) => Queue.offer(commands, cmd).pipe(Effect.ignore),
+        enqueue: enqueueCommand,
         takeEvent: () => Queue.take(events),
         getSessions: () => getSessionList(),
       };

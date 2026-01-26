@@ -5,7 +5,7 @@
   import { isTauri } from "@tauri-apps/api/core";
   import { initSettings, pollingConfig } from "$lib/settings";
   import { getActivePorts, initSavedPorts } from "$lib/ports";
-  import { activatePorts } from "$lib/runtime";
+  import { activatePorts, makeRuntime } from "$lib/runtime";
   import { startRuntimeStores } from "$lib/store/runtime";
   import AppShell from "$lib/components/app-shell.svelte";
   interface Props {
@@ -34,7 +34,7 @@
     left.crcRetryAttempts === right.crcRetryAttempts;
 
   const restartRuntime = async (config: RuntimePollingConfig) => {
-    await startRuntimeStores(config);
+    await startRuntimeStores(makeRuntime(config));
     const active = getActivePorts();
     if (active.length === 0) return;
     try {
@@ -55,7 +55,7 @@
         if (cancelled) return;
         // Start runtime after settings are loaded
         const config = get(pollingConfig);
-        await startRuntimeStores(config);
+        await startRuntimeStores(makeRuntime(config));
         currentConfig = config;
 
         unsubscribe = pollingConfig.subscribe((next) => {
