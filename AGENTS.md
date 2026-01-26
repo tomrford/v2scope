@@ -57,3 +57,4 @@ See `docs/plans/` for detailed specs:
 - TS/UI: update GET_SNAPSHOT_DATA decode + requests for sample-major ordering (contiguous chunks).
 - TS/UI: update GET_VAR_LIST/GET_CHANNEL_LABELS/GET_RT_LABELS decode + request payloads (required start/count, no per-entry id).
 - TS/UI: parse GET_INFO endianness + swap all multi-byte fields when host endianness differs.
+- UI: poll available ports list instead of manual refresh.

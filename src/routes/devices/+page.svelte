@@ -71,12 +71,7 @@
 
 <div class="flex min-h-0 flex-1 flex-col gap-6">
   <header>
-    <div class="space-y-1">
-      <h1 class="text-xl font-semibold text-foreground">Devices</h1>
-      <p class="text-sm text-muted-foreground">
-        Manage saved devices, monitor status, and control activation.
-      </p>
-    </div>
+    <h1 class="text-xl font-semibold text-foreground">Devices</h1>
   </header>
 
   <div class="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">

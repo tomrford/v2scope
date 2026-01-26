@@ -79,7 +79,7 @@
   }
 </script>
 
-<div class="flex h-full flex-col gap-3">
+<div class="flex h-full flex-col">
   <div class="flex-1 overflow-auto rounded-md border">
     <Table.Root>
       <Table.Header>
@@ -122,9 +122,5 @@
         {/each}
       </Table.Body>
     </Table.Root>
-  </div>
-
-  <div class="text-sm text-muted-foreground">
-    {selectedPaths.length} selected of {ports.length} available
   </div>
 </div>
