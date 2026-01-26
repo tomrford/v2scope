@@ -6,7 +6,7 @@ export {
   defaultSerialConfig,
   pollingConfig,
   snapshotConfig,
-} from "./store";
+} from "../store/settings";
 
 export { DEFAULT_SETTINGS } from "./defaults";
 

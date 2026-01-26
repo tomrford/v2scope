@@ -1,16 +1,14 @@
 import { writable, get } from "svelte/store";
-import { z } from "zod";
 import {
   SerialConfigSchema,
   type SerialConfig,
 } from "../transport/serial.schema";
-import { execute, selectAll } from "../db";
-import { SavedPortSchema, type SavedPort } from "./schema";
-
-const SavedPortRowSchema = z.object({
-  path: z.string(),
-  last_config_json: z.string().nullable().optional(),
-});
+import { SavedPortSchema, type SavedPort } from "../ports/schema";
+import {
+  listSavedPorts,
+  upsertSavedPorts as upsertSavedPortsDb,
+  removeSavedPorts as removeSavedPortsDb,
+} from "../db/ports";
 
 const normalizePaths = (paths: string[]): string[] =>
   Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
@@ -18,31 +16,8 @@ const normalizePaths = (paths: string[]): string[] =>
 export const savedPorts = writable<SavedPort[]>([]);
 export const activePorts = writable<string[]>([]);
 
-const decodeLastConfig = (value?: string | null): SerialConfig | undefined => {
-  if (!value) return undefined;
-  try {
-    const parsed = SerialConfigSchema.safeParse(JSON.parse(value));
-    return parsed.success ? parsed.data : undefined;
-  } catch {
-    return undefined;
-  }
-};
-
-const encodeLastConfig = (value?: SerialConfig): string | null => {
-  if (!value) return null;
-  return JSON.stringify(value);
-};
-
 const refreshSavedPorts = async (): Promise<void> => {
-  const rows = await selectAll(
-    "SELECT path, last_config_json FROM saved_ports ORDER BY path ASC",
-    SavedPortRowSchema,
-  );
-  const next = rows.map((row) => ({
-    path: row.path,
-    lastConfig: decodeLastConfig(row.last_config_json ?? undefined),
-  }));
-  savedPorts.set(next);
+  savedPorts.set(await listSavedPorts());
 };
 
 export async function initSavedPorts(): Promise<void> {
@@ -64,25 +39,14 @@ export async function upsertSavedPorts(entries: SavedPort[]): Promise<void> {
   const values = Array.from(normalized.values());
   if (values.length === 0) return;
 
-  for (const entry of values) {
-    await execute(
-      "INSERT INTO saved_ports (path, last_config_json) VALUES (?1, ?2) " +
-        "ON CONFLICT(path) DO UPDATE SET last_config_json = excluded.last_config_json",
-      [entry.path, encodeLastConfig(entry.lastConfig)],
-    );
-  }
-
+  await upsertSavedPortsDb(values);
   await refreshSavedPorts();
 }
 
 export async function removeSavedPorts(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
   if (normalized.length === 0) return;
-  const placeholders = normalized.map((_, index) => `?${index + 1}`).join(", ");
-  await execute(
-    `DELETE FROM saved_ports WHERE path IN (${placeholders})`,
-    normalized,
-  );
+  await removeSavedPortsDb(normalized);
   await refreshSavedPorts();
 }
 

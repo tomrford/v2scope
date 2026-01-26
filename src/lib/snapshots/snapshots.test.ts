@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { SnapshotMetaSchema, type SnapshotMeta } from "./store";
+import { SnapshotMetaSchema, type SnapshotMeta } from "./schema";
 import { TriggerMode } from "../protocol/types";
 
 const validMeta: SnapshotMeta = {

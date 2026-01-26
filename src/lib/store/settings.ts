@@ -1,8 +1,8 @@
 import { LazyStore } from "@tauri-apps/plugin-store";
 import { writable, derived, get } from "svelte/store";
-import { DEFAULT_SETTINGS } from "./defaults";
-import { SettingsSchema, type Settings } from "./schema";
-import { migrateLegacySavedPorts } from "../ports/store";
+import { DEFAULT_SETTINGS } from "../settings/defaults";
+import { SettingsSchema, type Settings } from "../settings/schema";
+import { migrateLegacySavedPorts } from "./ports";
 
 const STORE_FILE = "settings.json";
 let tauriStore: LazyStore | null = null;

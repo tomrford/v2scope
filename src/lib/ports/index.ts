@@ -10,6 +10,6 @@ export {
   setActivePorts,
   addActivePort,
   removeActivePort,
-} from "./store";
+} from "../store/ports";
 
 export { SavedPortSchema, type SavedPort } from "./schema";

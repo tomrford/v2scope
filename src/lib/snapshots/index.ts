@@ -1,8 +1,5 @@
-export {
-  SnapshotMetaSchema,
-  type SnapshotMeta,
-  type SnapshotEntry,
-} from "./store";
+export { SnapshotMetaSchema, type SnapshotMeta } from "./schema";
+export { type SnapshotEntry } from "../store/snapshots";
 export {
   snapshots,
   initSnapshots,
@@ -15,4 +12,4 @@ export {
   sessionSnapshots,
   persistedSnapshots,
   allSnapshots,
-} from "./store";
+} from "../store/snapshots";

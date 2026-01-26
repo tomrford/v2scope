@@ -30,7 +30,7 @@ export {
   stopRuntimeStores,
   enqueueRuntimeCommand,
   runRuntimeEffect,
-} from "./store";
+} from "../store/runtime";
 
 export {
   listPorts,

@@ -1,17 +1,17 @@
 import { Effect } from "effect";
 import type { SerialConfig } from "../transport/serial.schema";
 import type { PortInfo } from "../transport/serial.schema";
-import { getSettings } from "../settings/store";
+import { getSettings } from "../store/settings";
 import {
   getActivePorts,
   getSavedPorts,
   removeSavedPorts,
   setActivePorts,
   upsertSavedPorts,
-} from "../ports/store";
+} from "../store/ports";
 import { DeviceService } from "./DeviceService";
 import type { RuntimeCommand } from "./RuntimeService";
-import { enqueueRuntimeCommand, runRuntimeEffect } from "./store";
+import { enqueueRuntimeCommand, runRuntimeEffect } from "../store/runtime";
 
 const normalizePaths = (paths: string[]): string[] =>
   Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));

@@ -14,11 +14,11 @@ import type {
   RuntimeCommand,
   RuntimeDeviceError,
   RuntimeEvent,
-} from "./RuntimeService";
-import type { DeviceManager } from "./DeviceManager";
-import type { DeviceService } from "./DeviceService";
-import { RuntimeService } from "./RuntimeService";
-import { makeRuntime } from "./index";
+} from "../runtime/RuntimeService";
+import type { DeviceManager } from "../runtime/DeviceManager";
+import type { DeviceService } from "../runtime/DeviceService";
+import { RuntimeService } from "../runtime/RuntimeService";
+import { makeRuntime } from "../runtime";
 
 export type DeviceConnectionStatus = "connected" | "disconnected";
 
