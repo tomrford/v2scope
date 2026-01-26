@@ -3,6 +3,7 @@
   import * as RadioGroup from "$lib/components/ui/radio-group";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
+  import { Toggle } from "$lib/components/ui/toggle";
   import { settings, updateSetting } from "$lib/store/settings";
   import type { Settings } from "$lib/settings/schema";
   import type { SerialConfig } from "$lib/transport/serial.schema";
@@ -42,33 +43,26 @@
     open = false;
   }
 
-  // Helper for gc days radio binding
-  let gcDaysMode = $derived(
-    formState?.snapshotGcDays === "never" ? "never" : "days",
-  );
+  // GC toggle: pressed = enabled (cleanup after days), not pressed = never
+  let gcEnabled = $derived(formState?.snapshotGcDays !== "never");
   let gcDaysValue = $derived(
     typeof formState?.snapshotGcDays === "number"
       ? formState.snapshotGcDays
       : 30,
   );
 
-  function setGcDaysMode(mode: string) {
+  function setGcEnabled(enabled: boolean) {
     if (!formState) return;
-    if (mode === "never") {
-      formState.snapshotGcDays = "never";
-    } else {
+    if (enabled) {
       formState.snapshotGcDays = gcDaysValue;
+    } else {
+      formState.snapshotGcDays = "never";
     }
   }
 
   function setGcDaysValue(value: number) {
     if (!formState || formState.snapshotGcDays === "never") return;
     formState.snapshotGcDays = Math.max(1, Math.min(365, value));
-  }
-
-  function toggleAutoSave() {
-    if (!formState) return;
-    formState.snapshotAutoSave = !formState.snapshotAutoSave;
   }
 </script>
 
@@ -268,57 +262,41 @@
               <span class="text-sm text-muted-foreground"
                 >Auto-save snapshots</span
               >
-              <button
-                type="button"
-                role="switch"
+              <Toggle
+                variant="outline"
+                size="sm"
                 aria-label="Toggle auto-save snapshots"
-                aria-checked={formState.snapshotAutoSave}
-                onclick={toggleAutoSave}
-                class="relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent bg-input shadow-sm transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none data-[state=checked]:bg-primary"
-                data-state={formState.snapshotAutoSave
-                  ? "checked"
-                  : "unchecked"}
+                bind:pressed={formState.snapshotAutoSave}
               >
-                <span
-                  class="pointer-events-none block size-4 rounded-full bg-background shadow-lg ring-0 transition-transform data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0"
-                  data-state={formState.snapshotAutoSave
-                    ? "checked"
-                    : "unchecked"}
-                ></span>
-              </button>
+                {formState.snapshotAutoSave ? "On" : "Off"}
+              </Toggle>
             </div>
 
             <!-- Garbage Collection -->
-            <div class="grid grid-cols-[1fr_auto] items-start gap-4">
-              <span class="pt-1 text-sm text-muted-foreground"
-                >Snapshot cleanup</span
+            <div class="grid grid-cols-[1fr_auto] items-center gap-4">
+              <span class="text-sm text-muted-foreground">Snapshot cleanup</span
               >
-              <div class="flex flex-col gap-2">
-                <RadioGroup.Root
-                  value={gcDaysMode}
-                  onValueChange={setGcDaysMode}
-                  class="flex gap-4"
+              <div class="flex items-center gap-2">
+                <Toggle
+                  variant="outline"
+                  size="sm"
+                  aria-label="Toggle snapshot cleanup"
+                  pressed={gcEnabled}
+                  onPressedChange={setGcEnabled}
                 >
-                  <div class="flex items-center gap-2">
-                    <RadioGroup.Item value="never" id="gc-never" />
-                    <label for="gc-never" class="text-sm">Never</label>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <RadioGroup.Item value="days" id="gc-days" />
-                    <label for="gc-days" class="text-sm">After days</label>
-                  </div>
-                </RadioGroup.Root>
-                {#if gcDaysMode === "days"}
-                  <Input
-                    type="number"
-                    min={1}
-                    max={365}
-                    value={gcDaysValue}
-                    oninput={(e) =>
-                      setGcDaysValue(parseInt(e.currentTarget.value) || 30)}
-                    class="w-24"
-                  />
-                {/if}
+                  {gcEnabled ? "On" : "Off"}
+                </Toggle>
+                <Input
+                  type="number"
+                  min={1}
+                  max={365}
+                  value={gcDaysValue}
+                  disabled={!gcEnabled}
+                  oninput={(e) =>
+                    setGcDaysValue(parseInt(e.currentTarget.value) || 30)}
+                  class="w-20"
+                />
+                <span class="text-sm text-muted-foreground">days</span>
               </div>
             </div>
           </div>
