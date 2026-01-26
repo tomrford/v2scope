@@ -1,0 +1,112 @@
+import { derived, writable } from "svelte/store";
+import type { PortInfo } from "../transport/serial.schema";
+import { listPorts } from "../runtime/devices";
+import { activePorts, savedPorts } from "./ports";
+import { deviceSessions } from "./runtime";
+import type {
+  AvailablePortRow,
+  SavedDeviceRow,
+} from "../components/devices-table/types";
+import { getDeviceStatus } from "../components/devices-table/types";
+
+type AvailablePortsStatus = "idle" | "loading" | "ready" | "error";
+
+export type AvailablePortsState = {
+  status: AvailablePortsStatus;
+  ports: PortInfo[];
+  error: string | null;
+  updatedAt: number | null;
+};
+
+const dedupePorts = (ports: PortInfo[]): PortInfo[] => {
+  const map = new Map<string, PortInfo>();
+  for (const port of ports) {
+    if (!port.path) continue;
+    if (!map.has(port.path)) {
+      map.set(port.path, port);
+    }
+  }
+  return Array.from(map.values());
+};
+
+const toErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
+  }
+};
+
+export const availablePortsState = writable<AvailablePortsState>({
+  status: "idle",
+  ports: [],
+  error: null,
+  updatedAt: null,
+});
+
+export const selectedAvailablePaths = writable<string[]>([]);
+
+export const savedDeviceRows = derived(
+  [savedPorts, activePorts, deviceSessions, availablePortsState],
+  ([saved, active, sessions, available]): SavedDeviceRow[] => {
+    const activeSet = new Set(active);
+    const portInfoMap = new Map(
+      available.ports.map((port) => [port.path, port]),
+    );
+    return saved.map((port) => ({
+      port,
+      session: sessions.get(port.path) ?? null,
+      isActive: activeSet.has(port.path),
+      portInfo: portInfoMap.get(port.path) ?? null,
+    }));
+  },
+);
+
+export const availablePortRows = derived(
+  [availablePortsState, savedDeviceRows],
+  ([available, saved]): AvailablePortRow[] => {
+    const savedMap = new Map(saved.map((row) => [row.port.path, row]));
+    return available.ports.map((portInfo) => {
+      const savedRow = savedMap.get(portInfo.path);
+      return {
+        portInfo,
+        alreadySaved: Boolean(savedRow),
+        savedStatus: savedRow
+          ? getDeviceStatus(savedRow.session, savedRow.isActive)
+          : undefined,
+      };
+    });
+  },
+);
+
+export async function refreshAvailablePorts(): Promise<void> {
+  availablePortsState.update((state) => ({
+    ...state,
+    status: "loading",
+    error: null,
+  }));
+
+  try {
+    const ports = await listPorts();
+    const normalized = dedupePorts(ports);
+    availablePortsState.set({
+      status: "ready",
+      ports: normalized,
+      error: null,
+      updatedAt: Date.now(),
+    });
+  } catch (error) {
+    availablePortsState.set({
+      status: "error",
+      ports: [],
+      error: toErrorMessage(error),
+      updatedAt: Date.now(),
+    });
+  }
+}
+
+export function clearAvailableSelection(): void {
+  selectedAvailablePaths.set([]);
+}

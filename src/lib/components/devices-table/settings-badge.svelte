@@ -3,11 +3,12 @@
 
   type Props = {
     hasOverride: boolean;
+    summary?: string;
   };
 
-  let { hasOverride }: Props = $props();
+  let { hasOverride, summary }: Props = $props();
 </script>
 
-<Badge variant={hasOverride ? "outline" : "secondary"}>
+<Badge variant={hasOverride ? "outline" : "secondary"} title={summary}>
   {hasOverride ? "Custom" : "Default"}
 </Badge>

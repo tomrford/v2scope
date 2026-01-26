@@ -18,6 +18,9 @@
   import DeviceStatusBadge from "./device-status-badge.svelte";
   import SavedDeviceActions from "./saved-device-actions.svelte";
   import SettingsBadge from "./settings-badge.svelte";
+  import type { SerialConfig } from "$lib/transport/serial.schema";
+  import type { PortInfo } from "$lib/transport/serial.schema";
+  import { defaultSerialConfig } from "$lib/store/settings";
 
   type Props = {
     devices: SavedDeviceRow[];
@@ -39,12 +42,41 @@
 
   let columnFilters: ColumnFiltersState = $state([]);
 
+  const serialDefaults = $derived($defaultSerialConfig);
+
+  const formatVidPid = (portInfo?: PortInfo | null): string => {
+    if (!portInfo) return "—";
+    const { vid, pid } = portInfo;
+    if (vid === null && pid === null) return "—";
+    const vidStr = vid?.toString(16).toUpperCase().padStart(4, "0") ?? "????";
+    const pidStr = pid?.toString(16).toUpperCase().padStart(4, "0") ?? "????";
+    return `${vidStr}:${pidStr}`;
+  };
+
+  const formatSerialSummary = (config: SerialConfig): string => {
+    const bits =
+      config.dataBits === "Five"
+        ? "5"
+        : config.dataBits === "Six"
+          ? "6"
+          : config.dataBits === "Seven"
+            ? "7"
+            : "8";
+    const parity =
+      config.parity === "None" ? "N" : config.parity === "Odd" ? "O" : "E";
+    const stopBits = config.stopBits === "One" ? "1" : "2";
+    return `${config.baudRate} baud, ${bits}${parity}${stopBits}, timeout ${config.readTimeoutMs}ms`;
+  };
+
   const columns: ColumnDef<SavedDeviceRow>[] = [
     {
       id: "status",
       header: "Status",
       cell: ({ row }) => {
-        const status = getDeviceStatus(row.original.session, row.original.isActive);
+        const status = getDeviceStatus(
+          row.original.session,
+          row.original.isActive,
+        );
         const errorMessage = row.original.session?.error?.type ?? null;
         return renderComponent(DeviceStatusBadge, { status, errorMessage });
       },
@@ -69,9 +101,7 @@
       id: "vidpid",
       header: "VID/PID",
       cell: ({ row }) => {
-        const info = row.original.session?.info;
-        // VID/PID might come from PortInfo if available, for now show N/A
-        return "—";
+        return formatVidPid(row.original.portInfo);
       },
     },
     {
@@ -79,7 +109,14 @@
       header: "Settings",
       cell: ({ row }) => {
         const hasOverride = Boolean(row.original.port.lastConfig);
-        return renderComponent(SettingsBadge, { hasOverride });
+        const activeConfig =
+          row.original.port.lastConfig ?? serialDefaults ?? undefined;
+        const summary = activeConfig
+          ? `${hasOverride ? "Custom" : "Default"}: ${formatSerialSummary(activeConfig)}`
+          : hasOverride
+            ? "Custom serial settings"
+            : "Default serial settings";
+        return renderComponent(SettingsBadge, { hasOverride, summary });
       },
     },
     {
@@ -175,7 +212,7 @@
     </Table.Root>
   </div>
 
-  <div class="text-muted-foreground text-sm">
+  <div class="text-sm text-muted-foreground">
     {table.getFilteredRowModel().rows.length} of {devices.length} device(s)
   </div>
 </div>

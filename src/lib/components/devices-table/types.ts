@@ -10,6 +10,7 @@ export type SavedDeviceRow = {
   port: SavedPort;
   session: DeviceSession | null;
   isActive: boolean;
+  portInfo?: PortInfo | null;
 };
 
 /**
