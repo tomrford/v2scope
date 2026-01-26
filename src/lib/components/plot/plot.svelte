@@ -1,5 +1,6 @@
 <script lang="ts">
   import uPlot from "uplot";
+  import { onDestroy } from "svelte";
   import "uplot/dist/uPlot.min.css";
   import { cn } from "$lib/utils";
   import type { PlotProps } from "./types";
@@ -66,16 +67,14 @@
 
   // Create chart once we have dimensions
   $effect(() => {
-    if (!container || effectiveWidth === 0 || effectiveHeight === 0) return;
+    if (!container || chart || effectiveWidth === 0 || effectiveHeight === 0)
+      return;
+    chart = new uPlot(options, data, container);
+  });
 
-    if (!chart) {
-      chart = new uPlot(options, data, container);
-    }
-
-    return () => {
-      chart?.destroy();
-      chart = null;
-    };
+  onDestroy(() => {
+    chart?.destroy();
+    chart = null;
   });
 
   // Update data when it changes

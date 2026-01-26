@@ -27,6 +27,7 @@ import { DeviceService } from "./DeviceService";
 export interface PollingConfig {
   readonly stateHz: number;
   readonly frameHz: number;
+  readonly frameTimeoutMs: number;
   readonly crcRetryAttempts: number;
 }
 
@@ -37,8 +38,8 @@ export type RuntimeCommand =
       readonly config: SerialConfig;
     }
   | { readonly type: "disconnect"; readonly path: string }
-  | { readonly type: "pollState" }
-  | { readonly type: "pollFrame" }
+  | { readonly type: "pollState"; readonly queuedAt: number }
+  | { readonly type: "pollFrame"; readonly queuedAt: number }
   | { readonly type: "setState"; readonly state: State }
   | { readonly type: "trigger" }
   | {
@@ -84,6 +85,10 @@ export type RuntimeEvent =
       readonly type: "frameUpdated";
       readonly path: string;
       readonly frame: FrameResponse;
+    }
+  | {
+      readonly type: "frameCleared";
+      readonly path: string;
     }
   | {
       readonly type: "timingUpdated";
@@ -156,8 +161,11 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const deviceManager = yield* DeviceManager;
       const deviceService = yield* DeviceService;
       const sessions = yield* Ref.make(HashMap.empty<string, DeviceSession>());
-      const commands = yield* Queue.unbounded<RuntimeCommand>();
+      const commandQueueSize = 64;
+      const commands = yield* Queue.sliding<RuntimeCommand>(commandQueueSize);
       const events = yield* Queue.unbounded<RuntimeEvent>();
+      const statePollPending = yield* Ref.make(false);
+      const framePollPending = yield* Ref.make(false);
 
       const emit = (event: RuntimeEvent) =>
         Queue.offer(events, event).pipe(Effect.ignore);
@@ -278,6 +286,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const commandRetryCount = retryCount;
       const statePollRetryCount = retryCount;
       const framePollRetryCount = 0;
+      const frameTimeoutMs = Math.max(1, Math.floor(config.frameTimeoutMs));
 
       const handleCommand = (
         cmd: RuntimeCommand,
@@ -295,16 +304,30 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               statePollRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
-            );
+            ).pipe(Effect.ensuring(Ref.set(statePollPending, false)));
           case "pollFrame":
-            return runOnDevices(
-              "frame",
-              (device) => deviceService.getFrame(device.handle, device.info),
-              false,
-              framePollRetryCount,
-              true,
-              (path, frame) => emit({ type: "frameUpdated", path, frame }),
-            );
+            return Effect.gen(function* () {
+              const delayMs = Date.now() - cmd.queuedAt;
+              if (delayMs > frameTimeoutMs) {
+                const list = yield* getSessionList();
+                for (const session of list) {
+                  yield* emit({
+                    type: "frameCleared",
+                    path: session.device.path,
+                  });
+                }
+                return;
+              }
+
+              yield* runOnDevices(
+                "frame",
+                (device) => deviceService.getFrame(device.handle, device.info),
+                false,
+                framePollRetryCount,
+                true,
+                (path, frame) => emit({ type: "frameUpdated", path, frame }),
+              );
+            }).pipe(Effect.ensuring(Ref.set(framePollPending, false)));
           case "setState":
             return runOnDevices(
               "setState",
@@ -420,12 +443,28 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const frameIntervalMs = Math.max(1, Math.floor(1000 / config.frameHz));
 
       const statePoller = Effect.repeat(
-        Queue.offer(commands, { type: "pollState" }).pipe(Effect.ignore),
+        Effect.gen(function* () {
+          const pending = yield* Ref.get(statePollPending);
+          if (pending) return;
+          yield* Ref.set(statePollPending, true);
+          yield* Queue.offer(commands, {
+            type: "pollState",
+            queuedAt: Date.now(),
+          });
+        }).pipe(Effect.ignore),
         Schedule.spaced(Duration.millis(stateIntervalMs)),
       );
 
       const framePoller = Effect.repeat(
-        Queue.offer(commands, { type: "pollFrame" }).pipe(Effect.ignore),
+        Effect.gen(function* () {
+          const pending = yield* Ref.get(framePollPending);
+          if (pending) return;
+          yield* Ref.set(framePollPending, true);
+          yield* Queue.offer(commands, {
+            type: "pollFrame",
+            queuedAt: Date.now(),
+          });
+        }).pipe(Effect.ignore),
         Schedule.spaced(Duration.millis(frameIntervalMs)),
       );
 

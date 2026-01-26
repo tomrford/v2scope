@@ -42,7 +42,7 @@
 
   <!-- 5 channel plots, stacked with shared x-axis -->
   <div class="flex min-h-0 flex-1 flex-col gap-1">
-    {#each plotData as data, i}
+    {#each plotData as data, i (i)}
       <Item variant="outline" class="min-h-0 flex-1 p-0">
         <Plot
           {data}

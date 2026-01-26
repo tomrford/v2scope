@@ -33,7 +33,7 @@
       cell: ({ row }) =>
         renderComponent(DeviceStatusBadge, {
           status: getDeviceStatus(row.original.session, row.original.isActive),
-          errorMessage: row.original.session?.error?.type ?? null,
+          error: row.original.session?.error ?? null,
           hasOverride: Boolean(row.original.port.lastConfig),
         }),
     },
@@ -61,10 +61,16 @@
   <div class="flex-1 overflow-auto rounded-md border">
     <Table.Root>
       <Table.Header>
-        {#each table.getHeaderGroups() as headerGroup}
+        {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
           <Table.Row>
-            {#each headerGroup.headers as header}
-              <Table.Head class={header.id === "status" ? "text-right" : header.id === "actions" ? "w-10" : ""}>
+            {#each headerGroup.headers as header (header.id)}
+              <Table.Head
+                class={header.id === "status"
+                  ? "text-right"
+                  : header.id === "actions"
+                    ? "w-10"
+                    : ""}
+              >
                 {#if !header.isPlaceholder}
                   <FlexRender
                     content={header.column.columnDef.header}
@@ -77,10 +83,16 @@
         {/each}
       </Table.Header>
       <Table.Body>
-        {#each table.getRowModel().rows as row}
+        {#each table.getRowModel().rows as row (row.id)}
           <Table.Row data-state={row.getIsSelected() ? "selected" : undefined}>
-            {#each row.getVisibleCells() as cell}
-              <Table.Cell class={cell.column.id === "status" ? "text-right" : cell.column.id === "actions" ? "w-10 p-0" : ""}>
+            {#each row.getVisibleCells() as cell (cell.id)}
+              <Table.Cell
+                class={cell.column.id === "status"
+                  ? "text-right"
+                  : cell.column.id === "actions"
+                    ? "w-10 p-0"
+                    : ""}
+              >
                 <FlexRender
                   content={cell.column.columnDef.cell}
                   props={cell.getContext()}

@@ -139,9 +139,9 @@
   <div class="rounded-md border">
     <Table.Root>
       <Table.Header>
-        {#each table.getHeaderGroups() as headerGroup}
+        {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
           <Table.Row>
-            {#each headerGroup.headers as header}
+            {#each headerGroup.headers as header (header.id)}
               <Table.Head>
                 {#if !header.isPlaceholder}
                   <FlexRender
@@ -155,9 +155,9 @@
         {/each}
       </Table.Header>
       <Table.Body>
-        {#each table.getRowModel().rows as row}
+        {#each table.getRowModel().rows as row (row.id)}
           <Table.Row data-state={row.getIsSelected() ? "selected" : undefined}>
-            {#each row.getVisibleCells() as cell}
+            {#each row.getVisibleCells() as cell (cell.id)}
               <Table.Cell>
                 <FlexRender
                   content={cell.column.columnDef.cell}
@@ -177,7 +177,7 @@
     </Table.Root>
   </div>
 
-  <div class="text-muted-foreground text-sm">
+  <div class="text-sm text-muted-foreground">
     {table.getFilteredRowModel().rows.length} of {snapshots.length} snapshot(s)
   </div>
 </div>

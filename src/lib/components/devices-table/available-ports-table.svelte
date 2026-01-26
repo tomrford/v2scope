@@ -19,13 +19,11 @@
   let { ports, selectedPaths, onSelectionChange }: Props = $props();
 
   function toggleSelection(path: string) {
-    const current = new Set(selectedPaths);
-    if (current.has(path)) {
-      current.delete(path);
-    } else {
-      current.add(path);
+    if (selectedPaths.includes(path)) {
+      onSelectionChange?.(selectedPaths.filter((item) => item !== path));
+      return;
     }
-    onSelectionChange?.(Array.from(current));
+    onSelectionChange?.([...selectedPaths, path]);
   }
 
   function isSelected(path: string): boolean {
@@ -83,9 +81,9 @@
   <div class="flex-1 overflow-auto rounded-md border">
     <Table.Root>
       <Table.Header>
-        {#each table.getHeaderGroups() as headerGroup}
+        {#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
           <Table.Row>
-            {#each headerGroup.headers as header}
+            {#each headerGroup.headers as header (header.id)}
               <Table.Head>
                 {#if !header.isPlaceholder}
                   <FlexRender
@@ -99,12 +97,12 @@
         {/each}
       </Table.Header>
       <Table.Body>
-        {#each table.getRowModel().rows as row}
+        {#each table.getRowModel().rows as row (row.id)}
           <Table.Row
             class={getRowClass(row.original)}
             onclick={() => handleRowClick(row.original)}
           >
-            {#each row.getVisibleCells() as cell}
+            {#each row.getVisibleCells() as cell (cell.id)}
               <Table.Cell>
                 <FlexRender
                   content={cell.column.columnDef.cell}

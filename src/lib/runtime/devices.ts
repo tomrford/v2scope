@@ -67,6 +67,8 @@ export async function removeSaved(paths: string[]): Promise<void> {
 
 export async function activatePorts(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
+  if (normalized.length === 0) return;
+  await setActivePorts([...getActivePorts(), ...normalized]);
   await Promise.all(normalized.map((path) => enqueueConnect(path)));
 }
 

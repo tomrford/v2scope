@@ -1,6 +1,9 @@
 <script lang="ts" module>
   import type { Component, Snippet } from "svelte";
-  import type { RenderComponentConfig, RenderSnippetConfig } from "./render-helpers.js";
+  import type {
+    RenderComponentConfig,
+    RenderSnippetConfig,
+  } from "./render-helpers.js";
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   export type FlexRenderContent<TProps extends Record<string, unknown> = any> =
@@ -18,7 +21,9 @@
     | undefined;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function isRenderComponentConfig(content: any): content is RenderComponentConfig<any> {
+  function isRenderComponentConfig(
+    content: any,
+  ): content is RenderComponentConfig<any> {
     return (
       typeof content === "object" &&
       content !== null &&
@@ -28,7 +33,9 @@
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function isRenderSnippetConfig(content: any): content is RenderSnippetConfig<any> {
+  function isRenderSnippetConfig(
+    content: any,
+  ): content is RenderSnippetConfig<any> {
     return (
       typeof content === "object" &&
       content !== null &&
@@ -70,7 +77,11 @@
 
   // Compute the rendered value if content is a callback
   const renderedValue = $derived.by(() => {
-    if (isCallback(content) && !isRenderComponentConfig(content) && !isRenderSnippetConfig(content)) {
+    if (
+      isCallback(content) &&
+      !isRenderComponentConfig(content) &&
+      !isRenderSnippetConfig(content)
+    ) {
       const result = content(props);
       return result;
     }

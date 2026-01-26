@@ -2,7 +2,7 @@
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import EllipsisVertical from "@lucide/svelte/icons/ellipsis-vertical";
-  import { addActivePort, removeActivePort, removeSavedPorts } from "$lib/store/ports.js";
+  import { activatePorts, deactivatePorts, removeSaved } from "$lib/runtime";
   import type { SavedDeviceRow } from "./types.js";
 
   type Props = {
@@ -13,14 +13,14 @@
 
   const handleToggleActive = async () => {
     if (row.isActive) {
-      await removeActivePort(row.port.path);
+      await deactivatePorts([row.port.path]);
     } else {
-      await addActivePort(row.port.path);
+      await activatePorts([row.port.path]);
     }
   };
 
   const handleDelete = async () => {
-    await removeSavedPorts([row.port.path]);
+    await removeSaved([row.port.path]);
   };
 </script>
 

@@ -180,6 +180,13 @@ const applyEvent = (event: RuntimeEvent): void => {
       }));
       return;
     }
+    case "frameCleared": {
+      updateSession(event.path, (session) => ({
+        ...session,
+        frame: null,
+      }));
+      return;
+    }
     case "timingUpdated": {
       updateSession(event.path, (session) => ({
         ...session,

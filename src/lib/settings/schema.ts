@@ -5,7 +5,7 @@ export const SettingsSchema = z.object({
   statePollingHz: z.number().int().min(1).max(100),
   framePollingHz: z.number().int().min(1).max(50),
   frameTimeoutMs: z.number().int().min(10).max(5000),
-  // UI note: restart required to apply (runtime reads at startup).
+  // Runtime restarts on change to apply.
   crcRetryAttempts: z.number().int().min(1).max(10),
   liveBufferDurationS: z.number().min(1).max(300),
   defaultSerialConfig: SerialConfigSchema,

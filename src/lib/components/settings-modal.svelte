@@ -25,7 +25,11 @@
     }
   });
 
-  const sections: { id: SettingsSection; label: string; icon: typeof ClockIcon }[] = [
+  const sections: {
+    id: SettingsSection;
+    label: string;
+    icon: typeof ClockIcon;
+  }[] = [
     { id: "polling", label: "Polling", icon: ClockIcon },
     { id: "serial", label: "Serial", icon: CableIcon },
     { id: "snapshots", label: "Snapshots", icon: CameraIcon },
@@ -34,7 +38,9 @@
   // Helper for gc days toggle + value
   let gcEnabled = $derived($settings.snapshotGcDays !== "never");
   let gcDaysValue = $derived(
-    typeof $settings.snapshotGcDays === "number" ? $settings.snapshotGcDays : 30,
+    typeof $settings.snapshotGcDays === "number"
+      ? $settings.snapshotGcDays
+      : 30,
   );
 
   function setGcEnabled(enabled: boolean) {
@@ -80,7 +86,7 @@
       <div class="mb-2 px-2 text-xs font-medium text-muted-foreground">
         Settings
       </div>
-      {#each sections as section}
+      {#each sections as section (section.id)}
         {@const Icon = section.icon}
         <button
           class="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors {activeSection ===
@@ -107,7 +113,9 @@
         {#if activeSection === "polling"}
           <div class="grid gap-4">
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
-              <span class="text-sm text-muted-foreground">State polling (Hz)</span>
+              <span class="text-sm text-muted-foreground"
+                >State polling (Hz)</span
+              >
               <Input
                 type="number"
                 min={1}
@@ -121,7 +129,9 @@
               />
             </div>
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
-              <span class="text-sm text-muted-foreground">Frame polling (Hz)</span>
+              <span class="text-sm text-muted-foreground"
+                >Frame polling (Hz)</span
+              >
               <Input
                 type="number"
                 min={1}
@@ -135,7 +145,9 @@
               />
             </div>
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
-              <span class="text-sm text-muted-foreground">Frame timeout (ms)</span>
+              <span class="text-sm text-muted-foreground"
+                >Frame timeout (ms)</span
+              >
               <Input
                 type="number"
                 min={10}
@@ -149,7 +161,9 @@
               />
             </div>
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
-              <span class="text-sm text-muted-foreground">CRC retry attempts</span>
+              <span class="text-sm text-muted-foreground"
+                >CRC retry attempts</span
+              >
               <Input
                 type="number"
                 min={1}
@@ -193,7 +207,9 @@
               />
             </div>
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
-              <span class="text-sm text-muted-foreground">Read timeout (ms)</span>
+              <span class="text-sm text-muted-foreground"
+                >Read timeout (ms)</span
+              >
               <Input
                 type="number"
                 min={0}
@@ -211,14 +227,18 @@
                 type="single"
                 value={$settings.defaultSerialConfig.dataBits}
                 onValueChange={(v) => {
-                  if (v) updateSerialConfig("dataBits", v as SerialConfig["dataBits"]);
+                  if (v)
+                    updateSerialConfig(
+                      "dataBits",
+                      v as SerialConfig["dataBits"],
+                    );
                 }}
               >
                 <Select.Trigger class="w-full">
                   {$settings.defaultSerialConfig.dataBits}
                 </Select.Trigger>
                 <Select.Content>
-                  {#each dataBitsOptions as opt}
+                  {#each dataBitsOptions as opt (opt)}
                     <Select.Item value={opt}>{opt}</Select.Item>
                   {/each}
                 </Select.Content>
@@ -230,14 +250,15 @@
                 type="single"
                 value={$settings.defaultSerialConfig.parity}
                 onValueChange={(v) => {
-                  if (v) updateSerialConfig("parity", v as SerialConfig["parity"]);
+                  if (v)
+                    updateSerialConfig("parity", v as SerialConfig["parity"]);
                 }}
               >
                 <Select.Trigger class="w-full">
                   {$settings.defaultSerialConfig.parity}
                 </Select.Trigger>
                 <Select.Content>
-                  {#each parityOptions as opt}
+                  {#each parityOptions as opt (opt)}
                     <Select.Item value={opt}>{opt}</Select.Item>
                   {/each}
                 </Select.Content>
@@ -249,14 +270,18 @@
                 type="single"
                 value={$settings.defaultSerialConfig.stopBits}
                 onValueChange={(v) => {
-                  if (v) updateSerialConfig("stopBits", v as SerialConfig["stopBits"]);
+                  if (v)
+                    updateSerialConfig(
+                      "stopBits",
+                      v as SerialConfig["stopBits"],
+                    );
                 }}
               >
                 <Select.Trigger class="w-full">
                   {$settings.defaultSerialConfig.stopBits}
                 </Select.Trigger>
                 <Select.Content>
-                  {#each stopBitsOptions as opt}
+                  {#each stopBitsOptions as opt (opt)}
                     <Select.Item value={opt}>{opt}</Select.Item>
                   {/each}
                 </Select.Content>

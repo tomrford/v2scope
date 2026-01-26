@@ -20,8 +20,15 @@
     onRename?: (entry: SnapshotEntry) => void;
   };
 
-  let { entry, onPlot, onCompare, onSave, onExport, onDelete, onRename }: Props =
-    $props();
+  let {
+    entry,
+    onPlot,
+    onCompare,
+    onSave,
+    onExport,
+    onDelete,
+    onRename,
+  }: Props = $props();
 </script>
 
 <ContextMenu.Root>
@@ -64,7 +71,10 @@
     {/if}
     {#if onDelete}
       <ContextMenu.Separator />
-      <ContextMenu.Item onclick={() => onDelete(entry)} class="text-destructive">
+      <ContextMenu.Item
+        onclick={() => onDelete(entry)}
+        class="text-destructive"
+      >
         <Trash2 class="mr-2 h-4 w-4" />
         Delete
       </ContextMenu.Item>
