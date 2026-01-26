@@ -8,11 +8,11 @@
 	let { children }: Props = $props();
 </script>
 
-<div class="flex min-h-svh flex-col">
-	<Sidebar.Provider class="min-h-0 flex-1" disableKeyboardShortcut>
+<div class="flex h-svh flex-col overflow-hidden">
+	<Sidebar.Provider class="min-h-0 flex-1 overflow-hidden" disableKeyboardShortcut>
 		<AppSidebar />
-		<Sidebar.Inset>
-			<div class="flex flex-1 flex-col gap-4 p-4">
+		<Sidebar.Inset class="overflow-hidden">
+			<div class="flex h-full min-h-0 flex-col gap-4 overflow-hidden p-4">
 				{@render children?.()}
 			</div>
 		</Sidebar.Inset>
