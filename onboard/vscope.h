@@ -40,7 +40,7 @@ void vscopeTxBytes(const uint8_t* data, size_t len);
  *
  * @note Up to VSCOPE_MAX_VARIABLES can be registered.
  */
-void vscopeRegisterVar(const char* name, float* ptr);
+void vscopeRegisterVar(const char* name, volatile float* ptr);
 
 /**
  * @brief Register a real-time buffer variable.
@@ -53,7 +53,7 @@ void vscopeRegisterVar(const char* name, float* ptr);
  *
  * @note Up to VSCOPE_RT_BUFFER_LEN entries can be registered.
  */
-void vscopeRegisterRtBuffer(const char* name, float* ptr);
+void vscopeRegisterRtBuffer(const char* name, volatile float* ptr);
 
 /**
  * @brief Feed raw serial bytes into the protocol parser.
@@ -65,7 +65,7 @@ void vscopeRegisterRtBuffer(const char* name, float* ptr);
  * @param len    Number of bytes received.
  * @param now_us Current timestamp in microseconds (for frame timeout).
  */
-void vscopeRxHandler(const uint8_t* data, size_t len, uint32_t now_us);
+void vscopeRxHandler(const uint8_t* data, size_t len, uint64_t now_us);
 
 /**
  * @brief Initialize the VScope device.

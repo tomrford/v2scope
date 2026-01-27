@@ -1,3 +1,13 @@
+/**
+ * @file vscope.c
+ * @brief VScope - Virtual oscilloscope for embedded microcontrollers.
+ *
+ * Provides data acquisition, real-time buffering, and snapshot storage
+ * for debugging and visualization of embedded system variables.
+ *
+ * @copyright Copyright (c) 2026 Tom Ford
+ */
+
 #include "vscope.h"
 
 #include <stdbool.h>
@@ -69,7 +79,7 @@ typedef enum {
 // Variable struct
 typedef struct {
     char name[VSCOPE_NAME_LEN];
-    float* ptr;
+    volatile float* ptr;
 } VscopeVar;
 
 // Snapshot metadata struct
@@ -109,11 +119,11 @@ static bool registration_locked;
 static uint8_t channel_map[VSCOPE_NUM_CHANNELS];
 
 // Frame + capture buffers
-static float* vscope_frame[VSCOPE_NUM_CHANNELS];
+static volatile float* vscope_frame[VSCOPE_NUM_CHANNELS];
 static float vscope_buffer[VSCOPE_BUFFER_SIZE][VSCOPE_NUM_CHANNELS];
 
 // RT buffers
-static float* rt_values[VSCOPE_RT_BUFFER_LEN];
+static volatile float* rt_values[VSCOPE_RT_BUFFER_LEN];
 static char rt_names[VSCOPE_RT_BUFFER_LEN][VSCOPE_NAME_LEN];
 static uint8_t rt_count;
 
@@ -126,7 +136,7 @@ static bool snapshot_valid;
 static VscopeRxState rx_state;
 static uint16_t rx_expected_len;
 static uint16_t rx_index;
-static uint32_t rx_last_us;
+static uint64_t rx_last_us;
 static uint8_t rx_buf[VSCOPE_MAX_PAYLOAD + 2];
 
 //*********************************************************
@@ -623,7 +633,8 @@ static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload
 // RT BUFFER
 
 static void vscope_send_rt_buffer_value(uint8_t type, uint8_t idx) {
-    vscope_send_payload(type, (const uint8_t*)rt_values[idx], sizeof(float));
+    float value = *(rt_values[idx]);
+    vscope_send_payload(type, (const uint8_t*)&value, sizeof(value));
 }
 
 static void vscope_handle_get_rt_buffer(const uint8_t* payload, uint16_t payload_len) {
@@ -802,7 +813,7 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
 // Public Functions
 //*********************************************************
 
-void vscopeRegisterVar(const char* name, float* ptr) {
+void vscopeRegisterVar(const char* name, volatile float* ptr) {
     if (registration_locked || var_count >= VSCOPE_MAX_VARIABLES || ptr == NULL) {
         return;
     }
@@ -815,7 +826,7 @@ void vscopeRegisterVar(const char* name, float* ptr) {
     var_count += 1U;
 }
 
-void vscopeRegisterRtBuffer(const char* name, float* ptr) {
+void vscopeRegisterRtBuffer(const char* name, volatile float* ptr) {
     if (registration_locked || rt_count >= VSCOPE_RT_BUFFER_LEN || ptr == NULL) {
         return;
     }
@@ -828,12 +839,12 @@ void vscopeRegisterRtBuffer(const char* name, float* ptr) {
     rt_count += 1U;
 }
 
-void vscopeRxHandler(const uint8_t* data, size_t len, uint32_t now_us) {
+void vscopeRxHandler(const uint8_t* data, size_t len, uint64_t now_us) {
     if (data == NULL || len == 0U) {
         return;
     }
 
-    if (rx_state != VS_RX_IDLE && (uint32_t)(now_us - rx_last_us) > VSCOPE_FRAME_TIMEOUT_US) {
+    if (rx_state != VS_RX_IDLE && (now_us - rx_last_us) > (uint64_t)VSCOPE_FRAME_TIMEOUT_US) {
         vscope_reset_rx();
     }
 
