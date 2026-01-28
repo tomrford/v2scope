@@ -22,10 +22,6 @@ export {
 } from "./RuntimeService";
 
 export {
-  deviceSessions,
-  connectedSessions,
-  compatibility,
-  compatibleSessions,
   startRuntimeStores,
   stopRuntimeStores,
   enqueueRuntimeCommand,

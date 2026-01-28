@@ -16,12 +16,11 @@ export enum MessageType {
   GET_VAR_LIST = 0x0a,
   GET_CHANNEL_MAP = 0x0b,
   SET_CHANNEL_MAP = 0x0c,
-  GET_CHANNEL_LABELS = 0x0d,
-  GET_RT_LABELS = 0x0e,
-  GET_RT_BUFFER = 0x0f,
-  SET_RT_BUFFER = 0x10,
-  GET_TRIGGER = 0x11,
-  SET_TRIGGER = 0x12,
+  GET_RT_LABELS = 0x0d,
+  GET_RT_BUFFER = 0x0e,
+  SET_RT_BUFFER = 0x0f,
+  GET_TRIGGER = 0x10,
+  SET_TRIGGER = 0x11,
   ERROR = 0xff,
 }
 

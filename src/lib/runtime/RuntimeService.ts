@@ -14,9 +14,11 @@ import type {
   ChannelMapResponse,
   FrameResponse,
   RtBufferResponse,
+  RtLabelsResponse,
   StateResponse,
   TimingResponse,
   TriggerResponse,
+  VarListResponse,
 } from "../protocol";
 import { State, TriggerMode } from "../protocol";
 import type { SerialConfig } from "../transport/serial.schema";
@@ -102,9 +104,19 @@ export type RuntimeEvent =
       readonly map: ChannelMapResponse;
     }
   | {
+      readonly type: "varListUpdated";
+      readonly path: string;
+      readonly response: VarListResponse;
+    }
+  | {
       readonly type: "triggerUpdated";
       readonly path: string;
       readonly trigger: TriggerResponse;
+    }
+  | {
+      readonly type: "rtLabelsUpdated";
+      readonly path: string;
+      readonly response: RtLabelsResponse;
     }
   | {
       readonly type: "rtBufferUpdated";
@@ -270,6 +282,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
             return Ref.update(sessions, HashMap.set(path, session));
           }),
           Effect.tap((device) => emit({ type: "deviceConnected", device })),
+          Effect.tap((device) => syncDevice(device)),
           Effect.catchAll((error) =>
             setDeviceError(path, { type: "device", error }),
           ),
@@ -289,6 +302,117 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const statePollRetryCount = retryCount;
       const framePollRetryCount = 0;
       const frameTimeoutMs = Math.max(1, Math.floor(config.frameTimeoutMs));
+
+      const maxNameEntries = (nameLen: number): number =>
+        Math.max(1, Math.floor((252 - 3) / nameLen));
+
+      const fetchVarList = (device: ConnectedDevice) =>
+        Effect.gen(function* () {
+          const info = device.info;
+          const maxCount = maxNameEntries(info.nameLen);
+          let start = 0;
+          let total = info.varCount;
+
+          while (start < total) {
+            const page = yield* withRetry(
+              () => deviceService.getVarList(device.handle, info, start, maxCount),
+              commandRetryCount,
+            );
+            yield* emit({
+              type: "varListUpdated",
+              path: device.path,
+              response: page,
+            });
+
+            total = page.totalCount;
+            if (page.entries.length === 0) break;
+            const nextStart = page.startIdx + page.entries.length;
+            if (nextStart <= start) break;
+            start = nextStart;
+          }
+        });
+
+      const fetchRtLabels = (device: ConnectedDevice) =>
+        Effect.gen(function* () {
+          const info = device.info;
+          const maxCount = maxNameEntries(info.nameLen);
+          let start = 0;
+          let total = info.rtCount;
+
+          while (start < total) {
+            const page = yield* withRetry(
+              () =>
+                deviceService.getRtLabels(device.handle, info, start, maxCount),
+              commandRetryCount,
+            );
+            yield* emit({
+              type: "rtLabelsUpdated",
+              path: device.path,
+              response: page,
+            });
+
+            total = page.totalCount;
+            if (page.entries.length === 0) break;
+            const nextStart = page.startIdx + page.entries.length;
+            if (nextStart <= start) break;
+            start = nextStart;
+          }
+        });
+
+      const syncDevice = (device: ConnectedDevice) =>
+        Effect.gen(function* () {
+          const info = device.info;
+          const state = yield* withRetry(
+            () => deviceService.getState(device.handle),
+            commandRetryCount,
+          );
+          yield* emit({ type: "stateUpdated", path: device.path, state });
+
+          if (state.state === State.MISCONFIGURED) {
+            yield* fetchVarList(device);
+            return;
+          }
+
+          const timing = yield* withRetry(
+            () => deviceService.getTiming(device.handle, info),
+            commandRetryCount,
+          );
+          yield* emit({ type: "timingUpdated", path: device.path, timing });
+
+          const trigger = yield* withRetry(
+            () => deviceService.getTrigger(device.handle, info),
+            commandRetryCount,
+          );
+          yield* emit({ type: "triggerUpdated", path: device.path, trigger });
+
+          const map = yield* withRetry(
+            () => deviceService.getChannelMap(device.handle, info),
+            commandRetryCount,
+          );
+          yield* emit({ type: "channelMapUpdated", path: device.path, map });
+
+          yield* fetchVarList(device);
+          yield* fetchRtLabels(device);
+
+          for (let index = 0; index < info.rtCount; index += 1) {
+            const rt = yield* withRetry(
+              () =>
+                deviceService.getRtBuffer(device.handle, info, index),
+              commandRetryCount,
+            );
+            yield* emit({
+              type: "rtBufferUpdated",
+              path: device.path,
+              index,
+              rt,
+            });
+          }
+        }).pipe(
+          Effect.catchAll((error) =>
+            setDeviceError(device.path, { type: "device", error }),
+          ),
+          Effect.ignore,
+        );
 
       const handleCommand = (
         cmd: RuntimeCommand,

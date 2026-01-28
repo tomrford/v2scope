@@ -21,7 +21,6 @@ import {
   StateResponseSchema,
   FrameResponseSchema,
   ChannelMapResponseSchema,
-  ChannelLabelsResponseSchema,
   VarListResponseSchema,
   RtLabelsResponseSchema,
   RtBufferResponseSchema,
@@ -33,7 +32,6 @@ import {
   type StateResponse,
   type FrameResponse,
   type ChannelMapResponse,
-  type ChannelLabelsResponse,
   type VarListResponse,
   type RtLabelsResponse,
   type RtBufferResponse,
@@ -250,23 +248,6 @@ export const decodeSetChannelMapResponse = (
     channelIdx: readU8(payload, 0),
     catalogIdx: readU8(payload, 1),
   };
-};
-
-/** Decode GET_CHANNEL_LABELS response. Requires DeviceInfo. */
-export const decodeChannelLabelsResponse = (
-  payload: Uint8Array,
-  info: DeviceInfo,
-): ChannelLabelsResponse => {
-  const { totalCount, startIdx, names } = decodeNameListResponse(
-    payload,
-    info.nameLen,
-    "ChannelLabelsResponse",
-  );
-  return ChannelLabelsResponseSchema.parse({
-    totalCount,
-    startIdx,
-    labels: names,
-  });
 };
 
 /** Decode GET_VAR_LIST response. Requires DeviceInfo for name length. */
@@ -496,17 +477,6 @@ export const encodeSetChannelMapRequest = (
   buf[0] = MessageType.SET_CHANNEL_MAP;
   writeU8(buf, 1, channelIdx);
   writeU8(buf, 2, catalogIdx);
-  return buf;
-};
-
-export const encodeGetChannelLabelsRequest = (
-  startIdx: number,
-  maxCount: number,
-): Uint8Array => {
-  const buf = new Uint8Array(3);
-  buf[0] = MessageType.GET_CHANNEL_LABELS;
-  writeU8(buf, 1, startIdx);
-  writeU8(buf, 2, maxCount);
   return buf;
 };
 

@@ -19,6 +19,6 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-mod error;
 mod db;
+mod error;
 mod serial;

@@ -1,9 +1,10 @@
-import { writable, get } from "svelte/store";
+import { writable, get, derived } from "svelte/store";
 import {
   SerialConfigSchema,
   type SerialConfig,
 } from "../transport/serial.schema";
 import { SavedPortSchema, type SavedPort } from "../ports/schema";
+import { connectedDevices } from "./device-store";
 import {
   listSavedPorts,
   upsertSavedPorts as upsertSavedPortsDb,
@@ -14,7 +15,9 @@ const normalizePaths = (paths: string[]): string[] =>
   Array.from(new Set(paths.map((path) => path.trim()).filter(Boolean)));
 
 export const savedPorts = writable<SavedPort[]>([]);
-export const activePorts = writable<string[]>([]);
+export const activePorts = derived(connectedDevices, (devices) =>
+  devices.map((device) => device.path),
+);
 
 const refreshSavedPorts = async (): Promise<void> => {
   savedPorts.set(await listSavedPorts());
@@ -80,18 +83,4 @@ const parseLegacyEntries = (value: unknown): SavedPort[] => {
 
 export function getActivePorts(): string[] {
   return get(activePorts);
-}
-
-export async function setActivePorts(paths: string[]): Promise<void> {
-  activePorts.set(normalizePaths(paths));
-}
-
-export async function addActivePort(path: string): Promise<void> {
-  const current = getActivePorts();
-  await setActivePorts([...current, path]);
-}
-
-export async function removeActivePort(path: string): Promise<void> {
-  const current = getActivePorts();
-  await setActivePorts(current.filter((p) => p !== path));
 }

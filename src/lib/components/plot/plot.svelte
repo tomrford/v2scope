@@ -1,6 +1,6 @@
 <script lang="ts">
   import uPlot from "uplot";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import "uplot/dist/uPlot.min.css";
   import { cn } from "$lib/utils";
   import type { PlotProps } from "./types";
@@ -24,6 +24,7 @@
   let chart: uPlot | null = null;
   let containerWidth = $state(0);
   let containerHeight = $state(0);
+  let optionsKey = "";
 
   const effectiveWidth = $derived(width ?? containerWidth);
   const effectiveHeight = $derived(height ?? containerHeight);
@@ -65,11 +66,41 @@
     return () => ro.disconnect();
   });
 
-  // Create chart once we have dimensions
+  // Create or recreate chart when options/series change
   $effect(() => {
-    if (!container || chart || effectiveWidth === 0 || effectiveHeight === 0)
+    if (!container || effectiveWidth === 0 || effectiveHeight === 0) return;
+
+    const nextKey = JSON.stringify({
+      xLabel,
+      yLabel,
+      showLegend,
+      showCursor,
+      showXAxis,
+      interactive,
+      syncKey,
+      series: options.series?.map((s) => [
+        s.label ?? "",
+        s.stroke ?? "",
+        s.width ?? "",
+        s.dash ?? "",
+        s.scale ?? "",
+      ]),
+    });
+
+    const currentData = chart ? untrack(() => data) : data;
+    if (!currentData) return;
+
+    if (!chart) {
+      chart = new uPlot(options, currentData, container);
+      optionsKey = nextKey;
       return;
-    chart = new uPlot(options, data, container);
+    }
+
+    if (nextKey !== optionsKey) {
+      chart.destroy();
+      chart = new uPlot(options, currentData, container);
+      optionsKey = nextKey;
+    }
   });
 
   onDestroy(() => {

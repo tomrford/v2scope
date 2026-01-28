@@ -36,4 +36,5 @@ export type PlotProps = {
 
   /** Show cursor crosshair overlay */
   showCursor?: boolean;
+
 };

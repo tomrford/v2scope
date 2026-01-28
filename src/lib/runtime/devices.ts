@@ -2,13 +2,7 @@ import { Effect } from "effect";
 import type { SerialConfig } from "../transport/serial.schema";
 import type { PortInfo } from "../transport/serial.schema";
 import { getSettings } from "../store/settings";
-import {
-  getActivePorts,
-  getSavedPorts,
-  removeSavedPorts,
-  setActivePorts,
-  upsertSavedPorts,
-} from "../store/ports";
+import { getSavedPorts, removeSavedPorts, upsertSavedPorts } from "../store/ports";
 import { DeviceService } from "./DeviceService";
 import type { RuntimeCommand } from "./RuntimeService";
 import { enqueueRuntimeCommand, runRuntimeEffect } from "../store/runtime";
@@ -49,7 +43,6 @@ export async function addToSaved(paths: string[]): Promise<void> {
   }
 
   await upsertSavedPorts(Array.from(existing.values()));
-  await setActivePorts([...getActivePorts(), ...normalized]);
 }
 
 export async function removeSaved(paths: string[]): Promise<void> {
@@ -60,23 +53,17 @@ export async function removeSaved(paths: string[]): Promise<void> {
   );
 
   await removeSavedPorts(Array.from(normalized.values()));
-  await setActivePorts(
-    getActivePorts().filter((path) => !normalized.has(path)),
-  );
 }
 
 export async function activatePorts(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
   if (normalized.length === 0) return;
-  await setActivePorts([...getActivePorts(), ...normalized]);
   await Promise.all(normalized.map((path) => enqueueConnect(path)));
 }
 
 export async function deactivatePorts(paths: string[]): Promise<void> {
   const normalized = normalizePaths(paths);
   await Promise.all(normalized.map((path) => enqueueDisconnect(path)));
-  const current = getActivePorts();
-  await setActivePorts(current.filter((path) => !normalized.includes(path)));
 }
 
 export async function resyncPorts(paths: string[]): Promise<void> {

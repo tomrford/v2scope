@@ -24,7 +24,7 @@ We are building this pre-release. DO NOT under any circumstances value backwards
 
 Frame: `SYNC | LEN | TYPE | PAYLOAD | CRC8/16`
 
-Message families: GET_INFO, GET/SET_TIMING, GET/SET_STATE, TRIGGER, GET_FRAME, GET_SNAPSHOT_HEADER/DATA, GET/SET_CHANNEL_MAP, GET_VAR_LIST, GET_CHANNEL_LABELS, GET_RT_LABELS
+Message families: GET_INFO, GET/SET_TIMING, GET/SET_STATE, TRIGGER, GET_FRAME, GET_SNAPSHOT_HEADER/DATA, GET/SET_CHANNEL_MAP, GET_VAR_LIST, GET_RT_LABELS
 
 ## Commands
 
@@ -55,8 +55,13 @@ See `docs/plans/` for detailed specs:
 ## TODOs
 
 - TS/UI: update GET_SNAPSHOT_DATA decode + requests for sample-major ordering (contiguous chunks).
-- TS/UI: update GET_VAR_LIST/GET_CHANNEL_LABELS/GET_RT_LABELS decode + request payloads (required start/count, no per-entry id).
+- TS/UI: update GET_VAR_LIST/GET_RT_LABELS decode + request payloads (required start/count, no per-entry id).
 - TS/UI: parse GET_INFO endianness + swap all multi-byte fields when host endianness differs.
 - UI: poll available ports list instead of manual refresh.
 - Settings: enforce max live buffer size (derived from frame polling Hz + duration).
 - Settings: consider exposing only buffer duration; cap internal sampling frequency to honor max buffer size (drop Hz as duration grows).
+
+## Runed notes
+
+- FiniteStateMachine: actions, \_enter/\_exit, wildcard "\*", debounce; good for UI gating by sync state.
+- Context/PersistedState/StateHistory, Debounced/Throttled, watch, resource, useInterval, useEventListener, boolAttr.

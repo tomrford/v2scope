@@ -14,7 +14,6 @@ import {
   type StateResponse,
   type FrameResponse,
   type ChannelMapResponse,
-  type ChannelLabelsResponse,
   type VarListResponse,
   type RtLabelsResponse,
   type RtBufferResponse,
@@ -32,7 +31,6 @@ import {
   decodeChannelMapResponse,
   decodeSetChannelMapResponse,
   type SetChannelMapResponse,
-  decodeChannelLabelsResponse,
   decodeVarListResponse,
   decodeRtLabelsResponse,
   decodeRtBufferResponse,
@@ -51,7 +49,6 @@ import {
   encodeGetVarListRequest,
   encodeGetChannelMapRequest,
   encodeSetChannelMapRequest,
-  encodeGetChannelLabelsRequest,
   encodeGetRtLabelsRequest,
   encodeGetRtBufferRequest,
   encodeSetRtBufferRequest,
@@ -108,12 +105,6 @@ export interface DeviceServiceShape {
     channelIdx: number,
     catalogIdx: number,
   ) => Effect.Effect<SetChannelMapResponse, DeviceError>;
-  readonly getChannelLabels: (
-    handle: DeviceHandle,
-    info: DeviceInfo,
-    start: number,
-    max: number,
-  ) => Effect.Effect<ChannelLabelsResponse, DeviceError>;
   readonly getVarList: (
     handle: DeviceHandle,
     info: DeviceInfo,
@@ -258,13 +249,6 @@ export const DeviceServiceLive = Layer.succeed(DeviceService, {
       handle,
       () => encodeSetChannelMapRequest(channelIdx, catalogIdx),
       decodeSetChannelMapResponse,
-    ),
-
-  getChannelLabels: (handle, info, start, max) =>
-    makeProtocolRequest(
-      handle,
-      () => encodeGetChannelLabelsRequest(start, max),
-      (payload) => decodeChannelLabelsResponse(payload, info),
     ),
 
   getVarList: (handle, info, start, max) =>

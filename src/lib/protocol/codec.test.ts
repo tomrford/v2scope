@@ -9,7 +9,6 @@ import {
   decodeFrameResponse,
   decodeChannelMapResponse,
   decodeSetChannelMapResponse,
-  decodeChannelLabelsResponse,
   decodeVarListResponse,
   decodeRtLabelsResponse,
   decodeRtBufferResponse,
@@ -28,7 +27,6 @@ import {
   encodeGetVarListRequest,
   encodeGetChannelMapRequest,
   encodeSetChannelMapRequest,
-  encodeGetChannelLabelsRequest,
   encodeGetRtLabelsRequest,
   encodeGetRtBufferRequest,
   encodeSetRtBufferRequest,
@@ -258,32 +256,6 @@ describe("decodeSetChannelMapResponse", () => {
     expect(() => decodeSetChannelMapResponse(new Uint8Array(1))).toThrow(
       "wrong size",
     );
-  });
-});
-
-describe("decodeChannelLabelsResponse", () => {
-  it("decodes channel labels", () => {
-    const count = testDeviceInfo.numChannels;
-    const payload = new Uint8Array(3 + count * testDeviceInfo.nameLen);
-    payload[0] = testDeviceInfo.numChannels; // totalCount
-    payload[1] = 0; // startIdx
-    payload[2] = count; // count
-    const labels = ["CH0", "CH1", "CH2", "CH3", "CH4"];
-    labels.forEach((label, i) => {
-      const encoded = new TextEncoder().encode(label);
-      payload.set(encoded, 3 + i * testDeviceInfo.nameLen);
-    });
-
-    const result = decodeChannelLabelsResponse(payload, testDeviceInfo);
-    expect(result.totalCount).toBe(5);
-    expect(result.startIdx).toBe(0);
-    expect(result.labels).toEqual(labels);
-  });
-
-  it("throws on wrong size", () => {
-    expect(() =>
-      decodeChannelLabelsResponse(new Uint8Array(10), testDeviceInfo),
-    ).toThrow("wrong size");
   });
 });
 
@@ -584,15 +556,6 @@ describe("encodeSetChannelMapRequest", () => {
     expect(result[1]).toBe(2); // channelIdx
     expect(result[2]).toBe(5); // catalogIdx
     expect(result.length).toBe(3);
-  });
-});
-
-describe("encodeGetChannelLabelsRequest", () => {
-  it("encodes pagination params", () => {
-    const result = encodeGetChannelLabelsRequest(0, 5);
-    expect(result[0]).toBe(MessageType.GET_CHANNEL_LABELS);
-    expect(result[1]).toBe(0);
-    expect(result[2]).toBe(5);
   });
 });
 

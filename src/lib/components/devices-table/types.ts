@@ -1,14 +1,14 @@
 import type { SavedPort } from "$lib/ports/schema.js";
 import type { PortInfo } from "$lib/transport/serial.schema.js";
-import type { DeviceSession } from "$lib/store/runtime.js";
+import type { DeviceSnapshot } from "$lib/store/device-store.js";
 
 /**
  * Combined row data for the saved devices table.
- * Merges SavedPort with runtime DeviceSession info.
+ * Merges SavedPort with runtime device snapshot.
  */
 export type SavedDeviceRow = {
   port: SavedPort;
-  session: DeviceSession | null;
+  session: DeviceSnapshot | null;
   isActive: boolean;
   portInfo?: PortInfo | null;
 };
@@ -30,7 +30,7 @@ export type AvailablePortRow = {
  * Derive status from session data.
  */
 export function getDeviceStatus(
-  session: DeviceSession | null,
+  session: DeviceSnapshot | null,
   isActive: boolean,
 ): DeviceStatus {
   if (!isActive) return "deactivated";

@@ -161,6 +161,9 @@ pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, SerialE
         message: "device lock poisoned".to_string(),
     })?;
 
+    // Clear any stale data from previous failed reads before sending
+    let _ = port.clear(ClearBuffer::Input);
+
     let frame = build_frame(&payload)?;
     port.write_all(&frame)?;
     port.flush()?;

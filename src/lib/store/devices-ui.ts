@@ -2,7 +2,7 @@ import { derived, writable } from "svelte/store";
 import type { PortInfo } from "../transport/serial.schema";
 import { listPorts } from "../runtime/devices";
 import { activePorts, savedPorts } from "./ports";
-import { deviceSessions } from "./runtime";
+import { deviceStore } from "./device-store";
 import type {
   AvailablePortRow,
   SavedDeviceRow,
@@ -48,15 +48,15 @@ export const availablePortsState = writable<AvailablePortsState>({
 export const selectedAvailablePaths = writable<string[]>([]);
 
 export const savedDeviceRows = derived(
-  [savedPorts, activePorts, deviceSessions, availablePortsState],
-  ([saved, active, sessions, available]): SavedDeviceRow[] => {
+  [savedPorts, activePorts, deviceStore, availablePortsState],
+  ([saved, active, devices, available]): SavedDeviceRow[] => {
     const activeSet = new Set(active);
     const portInfoMap = new Map(
       available.ports.map((port) => [port.path, port]),
     );
     return saved.map((port) => ({
       port,
-      session: sessions.get(port.path) ?? null,
+      session: devices.get(port.path) ?? null,
       isActive: activeSet.has(port.path),
       portInfo: portInfoMap.get(port.path) ?? null,
     }));

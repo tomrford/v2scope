@@ -43,13 +43,6 @@ export const ChannelMapResponseSchema = z.object({
 });
 export type ChannelMapResponse = z.infer<typeof ChannelMapResponseSchema>;
 
-export const ChannelLabelsResponseSchema = z.object({
-  totalCount: z.number().int().nonnegative(),
-  startIdx: z.number().int().nonnegative(),
-  labels: z.array(z.string()),
-});
-export type ChannelLabelsResponse = z.infer<typeof ChannelLabelsResponseSchema>;
-
 export const VarListEntrySchema = z.string();
 export type VarListEntry = z.infer<typeof VarListEntrySchema>;
 

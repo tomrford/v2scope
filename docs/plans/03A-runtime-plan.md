@@ -117,7 +117,6 @@ interface DeviceService {
     handle: DeviceHandle,
     map: ChannelMap,
   ) => Effect<void, ProtocolError>;
-  getChannelLabels: (handle: DeviceHandle) => Effect<string[], ProtocolError>;
   getRtLabels: (handle: DeviceHandle) => Effect<string[], ProtocolError>;
   getRtBuffer: (
     handle: DeviceHandle,
@@ -191,7 +190,7 @@ When a device disconnects, it remains in `savedDevices` but leaves `activeDevice
 **Multi-device matching**:
 
 - **Mandatory match**: `channel_count` must be equal across all active devices
-- **Label intersection**: RT buffer labels and channel labels use string comparison; enable union where all devices share the label
+- **Label intersection**: RT buffer labels and var list entries use string comparison; enable union where all devices share the label
 - **State sync**: All active devices receive same SET commands
 
 ### PollingService

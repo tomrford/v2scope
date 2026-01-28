@@ -60,12 +60,11 @@ typedef enum {
     VSCOPE_MSG_GET_VAR_LIST = 0x0A,
     VSCOPE_MSG_GET_CHANNEL_MAP = 0x0B,
     VSCOPE_MSG_SET_CHANNEL_MAP = 0x0C,
-    VSCOPE_MSG_GET_CHANNEL_LABELS = 0x0D,
-    VSCOPE_MSG_GET_RT_LABELS = 0x0E,
-    VSCOPE_MSG_GET_RT_BUFFER = 0x0F,
-    VSCOPE_MSG_SET_RT_BUFFER = 0x10,
-    VSCOPE_MSG_GET_TRIGGER = 0x11,
-    VSCOPE_MSG_SET_TRIGGER = 0x12,
+    VSCOPE_MSG_GET_RT_LABELS = 0x0D,
+    VSCOPE_MSG_GET_RT_BUFFER = 0x0E,
+    VSCOPE_MSG_SET_RT_BUFFER = 0x0F,
+    VSCOPE_MSG_GET_TRIGGER = 0x10,
+    VSCOPE_MSG_SET_TRIGGER = 0x11,
     VSCOPE_MSG_ERROR = 0xFF,
 } VscopeMessageType;
 
@@ -281,14 +280,6 @@ static void vscope_send_payload(uint8_t type, const uint8_t* data, uint16_t data
         return;
     }
     vscope_send_frame(type, data, data_len);
-}
-
-// Get catalog index for a given channel
-static uint8_t vscope_get_mapped_channel(uint8_t channel_idx) {
-    if (channel_idx >= VSCOPE_NUM_CHANNELS) {
-        return 0U;
-    }
-    return channel_map[channel_idx];
 }
 
 //*********************************************************
@@ -551,48 +542,6 @@ static void vscope_handle_set_channel_map(const uint8_t* payload, uint16_t paylo
     vscope_send_payload(VSCOPE_MSG_SET_CHANNEL_MAP, data, sizeof(data));
 }
 
-// CHANNEL LABELS
-
-static void vscope_handle_get_channel_labels(const uint8_t* payload, uint16_t payload_len) {
-    if (payload_len != 2U) {
-        vscope_send_error(VSCOPE_ERR_BAD_LEN);
-        return;
-    }
-
-    uint8_t start_idx = payload[0];
-    uint8_t requested_count = payload[1];
-
-    if (start_idx > (uint8_t)VSCOPE_NUM_CHANNELS) {
-        vscope_send_error(VSCOPE_ERR_BAD_PARAM);
-        return;
-    }
-
-    uint16_t entry_size = (uint16_t)VSCOPE_NAME_LEN;
-    uint16_t max_entries = (uint16_t)((VSCOPE_MAX_PAYLOAD - 3U) / entry_size);
-    uint16_t available = (uint16_t)(VSCOPE_NUM_CHANNELS - start_idx);
-    uint16_t desired = (uint16_t)requested_count;
-    uint16_t count = vscope_min_u16(desired, vscope_min_u16(available, max_entries));
-
-    uint8_t data[VSCOPE_MAX_PAYLOAD];
-    uint16_t offset = 0U;
-    data[offset++] = (uint8_t)VSCOPE_NUM_CHANNELS;
-    data[offset++] = start_idx;
-    data[offset++] = (uint8_t)count;
-
-    for (uint16_t i = 0U; i < count; i += 1U) {
-        uint8_t channel_idx = (uint8_t)(start_idx + i);
-        uint8_t id = vscope_get_mapped_channel(channel_idx);
-        if (id < var_count) {
-            vscope_write_str_fixed(&data[offset], var_catalog[id].name, VSCOPE_NAME_LEN);
-        } else {
-            memset(&data[offset], 0, VSCOPE_NAME_LEN);
-        }
-        offset = (uint16_t)(offset + VSCOPE_NAME_LEN);
-    }
-
-    vscope_send_payload(VSCOPE_MSG_GET_CHANNEL_LABELS, data, offset);
-}
-
 // RT LABELS
 
 static void vscope_handle_get_rt_labels(const uint8_t* payload, uint16_t payload_len) {
@@ -780,9 +729,6 @@ static void vscope_handle_frame(uint8_t type, const uint8_t* payload, uint16_t p
             break;
         case VSCOPE_MSG_SET_CHANNEL_MAP:
             vscope_handle_set_channel_map(payload, payload_len);
-            break;
-        case VSCOPE_MSG_GET_CHANNEL_LABELS:
-            vscope_handle_get_channel_labels(payload, payload_len);
             break;
         case VSCOPE_MSG_GET_RT_LABELS:
             vscope_handle_get_rt_labels(payload, payload_len);

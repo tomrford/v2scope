@@ -34,8 +34,8 @@
     left.crcRetryAttempts === right.crcRetryAttempts;
 
   const restartRuntime = async (config: RuntimePollingConfig) => {
-    await startRuntimeStores(makeRuntime(config));
     const active = getActivePorts();
+    await startRuntimeStores(makeRuntime(config));
     if (active.length === 0) return;
     try {
       await activatePorts(active);

@@ -140,17 +140,7 @@ Notes:
 **Request payload:** `u8 channel_idx` + `u8 catalog_idx`
 **Response data:** `u8 channel_idx` + `u8 catalog_idx` (echo)
 
-### `0x0D` GET_CHANNEL_LABELS
-
-**Request payload:** `u8 start_idx`, `u8 max_count`  
-**Response data:**
-
-- `u8 total_count`
-- `u8 start_idx`
-- `u8 count`
-- Repeated `count` times: `char[VSCOPE_NAME_LEN]` name (mapped channel labels)
-
-### `0x0E` GET_RT_LABELS
+### `0x0D` GET_RT_LABELS
 
 **Request payload:** `u8 start_idx`, `u8 max_count`
 
@@ -161,17 +151,17 @@ Notes:
 - `u8 count`
 - Repeated `count` times: `char[VSCOPE_NAME_LEN]` name
 
-### `0x0F` GET_RT_BUFFER
+### `0x0E` GET_RT_BUFFER
 
 **Request payload:** `u8 index`  
 **Response data:** `float value`
 
-### `0x10` SET_RT_BUFFER
+### `0x0F` SET_RT_BUFFER
 
 **Request payload:** `u8 index`, `float value`  
 **Response data:** `float value`
 
-### `0x11` GET_TRIGGER
+### `0x10` GET_TRIGGER
 
 **Request:** empty payload  
 **Response data:** `float threshold`, `u8 channel`, `u8 mode`
@@ -183,7 +173,7 @@ Trigger modes:
 - `2` FALLING
 - `3` BOTH
 
-### `0x12` SET_TRIGGER
+### `0x11` SET_TRIGGER
 
 **Request payload:** `float threshold`, `u8 channel`, `u8 mode`  
 **Response data:** `float threshold`, `u8 channel`, `u8 mode`
