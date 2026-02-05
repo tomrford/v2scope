@@ -28,11 +28,15 @@ type StaticConsensus = {
   compatiblePaths: string[];
 };
 
+type CatalogEntry = {
+  idx: number;
+  name: string;
+};
+
 type VariableConsensus = {
   ready: boolean;
   aligned: boolean;
-  names: string[];
-  nameToIdxByDevice: Map<string, Map<string, number>>;
+  entries: CatalogEntry[];
 };
 
 type RtConsensus = {
@@ -162,7 +166,7 @@ const emptyConsensus = (): DeviceConsensus => ({
   timing: { value: null, aligned: false },
   trigger: { value: null, aligned: false },
   channelMap: { value: null, aligned: false },
-  variables: { ready: false, aligned: false, names: [], nameToIdxByDevice: new Map() },
+  variables: { ready: false, aligned: false, entries: [] },
   rt: {
     ready: false,
     aligned: false,
@@ -279,11 +283,6 @@ export const deviceConsensus = derived(
     const variablesReady = devices.every((device) => listReady(device.catalog.varList));
     const rtLabelsReady = devices.every((device) => listReady(device.catalog.rtLabels));
 
-    const varNameToIdxByDevice = new Map<string, Map<string, number>>();
-    for (const device of devices) {
-      varNameToIdxByDevice.set(device.path, buildNameToIdx(device.catalog.varList));
-    }
-
     const rtNameToIdxByDevice = new Map<string, Map<string, number>>();
     for (const device of devices) {
       rtNameToIdxByDevice.set(device.path, buildNameToIdx(device.catalog.rtLabels));
@@ -300,12 +299,12 @@ export const deviceConsensus = derived(
       rtLabelsReady &&
       devices.every((device) => listEqual(device.catalog.rtLabels, baselineRtEntries));
 
-    const baselineVarNames = variablesReady
-      ? (devices[0].catalog.varList?.entries.filter(Boolean) as string[])
-      : [];
-    const varNames = variablesReady
-      ? intersectNames(baselineVarNames, Array.from(varNameToIdxByDevice.values()))
-      : [];
+    const variableEntries =
+      variableCatalogAligned && baselineVarEntries
+        ? baselineVarEntries.entries
+            .map((name, idx) => (name ? { idx, name } : null))
+            .filter(Boolean) as CatalogEntry[]
+        : [];
 
     const baselineRtNames = rtLabelsReady
       ? (devices[0].catalog.rtLabels?.entries.filter(Boolean) as string[])
@@ -381,8 +380,7 @@ export const deviceConsensus = derived(
       variables: {
         ready: variablesReady,
         aligned: variableCatalogAligned,
-        names: varNames,
-        nameToIdxByDevice: varNameToIdxByDevice,
+        entries: variableEntries,
       },
       rt: {
         ready: rtLabelsReady,

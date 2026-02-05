@@ -9,6 +9,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            crate::db::take_startup_notice,
             crate::serial::list_ports,
             crate::serial::open_device,
             crate::serial::close_device,

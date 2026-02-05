@@ -1,8 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { Plot } from "$lib/components/plot";
-  import { Button } from "$lib/components/ui/button";
   import { Item } from "$lib/components/ui/item";
+  import ChannelsPopover from "$lib/components/scope/channels-popover.svelte";
+  import TimingPopover from "$lib/components/scope/timing-popover.svelte";
+  import TriggerPopover from "$lib/components/scope/trigger-popover.svelte";
+  import RtBufferPopover from "$lib/components/scope/rt-buffer-popover.svelte";
+  import RunStopButton from "$lib/components/scope/run-stop-button.svelte";
   import { frameTick } from "$lib/store/runtime";
   import { connectedDevices } from "$lib/store/device-store";
   import { deviceConsensus } from "$lib/store/device-consensus";
@@ -22,7 +26,6 @@
 
   type ChannelPlot = {
     x: Array<number>;
-    ys: Array<Array<number | null>>;
     series: uPlot.Series[];
   };
 
@@ -56,6 +59,7 @@
     size: number,
     channels: number,
     frameHz: number,
+    cursor: number = size - 1,
   ): FrameRing => ({
     path,
     label,
@@ -63,11 +67,21 @@
     size,
     channels,
     frameHz,
-    cursor: size - 1,
+    cursor,
     data: Array.from({ length: channels }, () =>
       Array.from({ length: size }, () => null),
     ),
   });
+
+  const mapCursorForResize = (prev: FrameRing, nextSize: number): number => {
+    const prevNext = (prev.cursor + 1) % prev.size;
+    const ratio = prevNext / prev.size;
+    const mappedNext = Math.max(
+      0,
+      Math.min(nextSize - 1, Math.floor(ratio * nextSize)),
+    );
+    return (mappedNext - 1 + nextSize) % nextSize;
+  };
 
   // Use regular variables for mutable data (not reactive)
   let rings: FrameRing[] = [];
@@ -113,16 +127,10 @@
         ring.data[index]?.fill(null);
       }
     }
-
-    for (const index of indices) {
-      const plot = displayPlots[index];
-      if (!plot) continue;
-      for (const ys of plot.ys) {
-        ys.fill(null);
-      }
-    }
-
-    plotDataArrays = displayPlots.map((p) => [p.x, ...p.ys] as uPlot.AlignedData);
+    plotDataArrays = displayPlots.map(
+      (plot, channelIdx) =>
+        [plot.x, ...rings.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
+    );
   };
 
   // Create/update rings when sessions or config change
@@ -166,23 +174,29 @@
         prev.color = color;
         next.push(prev);
       } else {
-        next.push(createRing(path, label, color, size, channels, frameHz));
+        const mappedCursor = prev
+          ? mapCursorForResize(prev, size)
+          : size - 1;
+        next.push(
+          createRing(path, label, color, size, channels, frameHz, mappedCursor),
+        );
       }
     }
     rings = next;
 
-    // Create stable display buffers
+    // Build plot metadata. Data arrays come directly from ring storage.
     const x = Array.from({ length: size }, (_, i) => i / frameHz);
     displayPlots = Array.from({ length: channels }, () => ({
       x,
-      ys: next.map(() => Array.from({ length: size }, () => null)),
       series: next.map((ring) => ({ label: ring.label, stroke: ring.color })),
     }));
 
     hasPlots = displayPlots.length > 0;
     plotSeries = displayPlots.map((p) => p.series);
-    // Initialize plot data arrays
-    plotDataArrays = displayPlots.map((p) => [p.x, ...p.ys] as uPlot.AlignedData);
+    plotDataArrays = displayPlots.map(
+      (plot, channelIdx) =>
+        [plot.x, ...next.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
+    );
   });
 
   // Clear channel buffers when channel map changes
@@ -226,64 +240,50 @@
     lastChannelMap = [...channelMap];
   });
 
-  // On each frame tick: update ring cursors and write frame data
+  // On each frame tick: sweep write one point and keep a single null flyback gap.
   $effect(() => {
     const frameTick_ = $frameTick;
     if (frameTick_ === 0) return;
 
-    // Read mutable state without tracking (these are plain JS objects now)
     const currentRings = rings;
-    const currentDisplayPlots = displayPlots;
     const currentSessions = untrack(() => sessions);
 
     if (currentRings.length === 0) return;
+    const frameByPath = new Map(
+      currentSessions.map((session) => [session.path, session.frame]),
+    );
 
-    // Advance cursors and null out current position
+    // Write one point at next cursor and keep one null slot ahead (sweep gap).
     for (const ring of currentRings) {
-      ring.cursor = (ring.cursor + 1) % ring.size;
+      const writeIdx = (ring.cursor + 1) % ring.size;
+      const gapIdx = (writeIdx + 1) % ring.size;
+      const frame = frameByPath.get(ring.path);
       for (let c = 0; c < ring.channels; c += 1) {
-        ring.data[c][ring.cursor] = null;
-      }
-    }
-
-    // Write frame data from sessions
-    const ringMap = new Map(currentRings.map((ring) => [ring.path, ring]));
-    for (const session of currentSessions) {
-      const ring = ringMap.get(session.path);
-      const frame = session.frame;
-      if (!ring || !frame) continue;
-      for (let c = 0; c < ring.channels; c += 1) {
-        ring.data[c][ring.cursor] = frame.values[c] ?? null;
-      }
-    }
-
-    // Copy rotated data into stable display buffers (in-place)
-    for (let c = 0; c < currentDisplayPlots.length; c += 1) {
-      const plot = currentDisplayPlots[c];
-      for (let r = 0; r < currentRings.length; r += 1) {
-        const ring = currentRings[r];
-        const src = ring.data[c];
-        const dst = plot.ys[r];
-        const start = (ring.cursor + 1) % ring.size;
-        for (let i = 0; i < ring.size; i += 1) {
-          dst[i] = src[(start + i) % ring.size];
+        ring.data[c][writeIdx] = frame?.values[c] ?? null;
+        if (ring.size > 1) {
+          ring.data[c][gapIdx] = null;
         }
       }
+      ring.cursor = writeIdx;
     }
 
-    // Rebuild plot data arrays (new reference triggers reactive update)
-    plotDataArrays = currentDisplayPlots.map((p) => [p.x, ...p.ys] as uPlot.AlignedData);
-
+    plotDataArrays = displayPlots.map(
+      (plot, channelIdx) =>
+        [plot.x, ...currentRings.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
+    );
   });
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-hidden">
-  <!-- Settings buttons -->
-  <div class="flex shrink-0 gap-2">
-    <Button variant="outline">Channels</Button>
-    <Button variant="outline">Timing</Button>
-    <Button variant="outline">Trigger</Button>
-    <Button variant="outline">Display</Button>
+  <!-- Control bar -->
+  <div class="flex shrink-0 items-start gap-2">
+    <ChannelsPopover />
+    <TimingPopover />
+    <TriggerPopover />
+    <RtBufferPopover />
+    <div class="ml-auto">
+      <RunStopButton />
+    </div>
   </div>
 
   <!-- 5 channel plots, stacked with shared x-axis -->

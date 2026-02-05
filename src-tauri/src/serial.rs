@@ -43,6 +43,20 @@ struct Registry {
     ports: RwLock<HashMap<u64, PortHandle>>,
 }
 
+fn poisoned_registry_lock(context: &str) -> SerialError {
+    SerialError::IoError {
+        message: format!("registry lock poisoned during {context}"),
+    }
+}
+
+fn poisoned_device_lock(handle_id: u64, context: &str) -> SerialError {
+    SerialError::IoError {
+        message: format!(
+            "device lock poisoned during {context}; handle {handle_id} removed; reconnect required"
+        ),
+    }
+}
+
 impl Registry {
     fn new() -> Self {
         Self {
@@ -51,21 +65,30 @@ impl Registry {
         }
     }
 
-    fn insert(&self, port: Box<dyn SerialPort + Send>) -> u64 {
+    fn insert(&self, port: Box<dyn SerialPort + Send>) -> Result<u64, SerialError> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let mut ports = self.ports.write().expect("lock ports");
+        let mut ports = self
+            .ports
+            .write()
+            .map_err(|_| poisoned_registry_lock("insert"))?;
         ports.insert(id, Arc::new(Mutex::new(port)));
-        id
+        Ok(id)
     }
 
-    fn get(&self, id: u64) -> Option<PortHandle> {
-        let ports = self.ports.read().expect("lock ports");
-        ports.get(&id).cloned()
+    fn get(&self, id: u64) -> Result<Option<PortHandle>, SerialError> {
+        let ports = self
+            .ports
+            .read()
+            .map_err(|_| poisoned_registry_lock("get"))?;
+        Ok(ports.get(&id).cloned())
     }
 
-    fn remove(&self, id: u64) -> Option<PortHandle> {
-        let mut ports = self.ports.write().expect("lock ports");
-        ports.remove(&id)
+    fn remove(&self, id: u64) -> Result<Option<PortHandle>, SerialError> {
+        let mut ports = self
+            .ports
+            .write()
+            .map_err(|_| poisoned_registry_lock("remove"))?;
+        Ok(ports.remove(&id))
     }
 }
 
@@ -125,22 +148,23 @@ pub fn open_device(path: String, config: SerialConfig) -> Result<u64, SerialErro
         }
         _ => SerialError::from(err),
     })?;
-    Ok(registry().insert(port))
+    registry().insert(port)
 }
 
 #[tauri::command]
 pub fn close_device(handle_id: u64) -> Result<(), SerialError> {
-    let _ = registry().remove(handle_id);
+    let _ = registry().remove(handle_id)?;
     Ok(())
 }
 
 #[tauri::command]
 pub fn flush_device(handle_id: u64) -> Result<(), SerialError> {
     let port = registry()
-        .get(handle_id)
+        .get(handle_id)?
         .ok_or(SerialError::InvalidHandle { handle_id })?;
-    let port = port.lock().map_err(|_| SerialError::IoError {
-        message: "device lock poisoned".to_string(),
+    let port = port.lock().map_err(|_| {
+        let _ = registry().remove(handle_id);
+        poisoned_device_lock(handle_id, "flush_device")
     })?;
     port.clear(ClearBuffer::All)?;
     Ok(())
@@ -155,10 +179,11 @@ pub fn send_request(handle_id: u64, payload: Vec<u8>) -> Result<Vec<u8>, SerialE
     }
 
     let port = registry()
-        .get(handle_id)
+        .get(handle_id)?
         .ok_or(SerialError::InvalidHandle { handle_id })?;
-    let mut port = port.lock().map_err(|_| SerialError::IoError {
-        message: "device lock poisoned".to_string(),
+    let mut port = port.lock().map_err(|_| {
+        let _ = registry().remove(handle_id);
+        poisoned_device_lock(handle_id, "send_request")
     })?;
 
     // Clear any stale data from previous failed reads before sending

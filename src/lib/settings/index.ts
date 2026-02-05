@@ -3,6 +3,8 @@ export {
   initSettings,
   updateSetting,
   getSettings,
+  settingsRecoveryPending,
+  settingsRecoveryWarning,
   defaultSerialConfig,
   pollingConfig,
   snapshotConfig,

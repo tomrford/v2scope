@@ -142,8 +142,11 @@ export const evaluateCommand = (
   }
 
   const stopOnlyMode = facts.controlMode === "mismatch_stop_only";
+  const stopOnlyAllowed =
+    (cmd.type === "setState" && cmd.state === State.HALTED) ||
+    cmd.type === "setChannelMap";
 
-  if (stopOnlyMode && !(cmd.type === "setState" && cmd.state === State.HALTED)) {
+  if (stopOnlyMode && !stopOnlyAllowed) {
     return {
       allowed: false,
       reason: "stop_only",

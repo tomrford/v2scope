@@ -50,6 +50,7 @@ describe("runtime policy core", () => {
     expect(permissions.setRunState).toBe(false);
     expect(permissions.setTiming).toBe(false);
     expect(permissions.setRtBuffer).toBe(false);
+    expect(permissions.setChannelMap).toBe(true);
   });
 
   it("blocks RUNNING in mismatch_run_blocked mode", () => {

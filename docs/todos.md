@@ -2,13 +2,13 @@
 
 ## Runtime/UI
 
-- [ ] Bootstrap error UI if settings/ports/runtime init fails (`src/routes/+layout.svelte`).
+- [x] Bootstrap error UI if settings/ports/runtime init fails (`src/routes/+layout.svelte`).
 - [ ] Lock settings while device state RUNNING/ACQUIRING (runtime guard + UI disable).
 - [ ] Saved/available device table filter (path/name/vid/pid).
 
 ## Rust
 
-- [ ] Document lock-poisoning assumption in `src-tauri/src/serial.rs` or replace `expect` with recovery.
+- [x] Lock-poisoning handling in `src-tauri/src/serial.rs` now recovers with typed errors (no `expect` panics).
 
 ## Notes
 

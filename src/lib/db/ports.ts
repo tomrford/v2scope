@@ -4,9 +4,10 @@ import {
   type SerialConfig,
 } from "../transport/serial.schema";
 import { type SavedPort } from "../ports/schema";
-import { execute, selectAll } from "./index";
+import { execute, getDb } from "./index";
 
 const SavedPortRowSchema = z.object({
+  rowid: z.number().int().nonnegative(),
   path: z.string(),
   last_config_json: z.string().nullable().optional(),
 });
@@ -27,11 +28,38 @@ const encodeLastConfig = (value?: SerialConfig): string | null => {
 };
 
 export async function listSavedPorts(): Promise<SavedPort[]> {
-  const rows = await selectAll(
-    "SELECT path, last_config_json FROM saved_ports ORDER BY path ASC",
-    SavedPortRowSchema,
+  const db = await getDb();
+  const rawRows = await db.select<Record<string, unknown>[]>(
+    "SELECT rowid, path, last_config_json FROM saved_ports ORDER BY path ASC",
   );
-  return rows.map((row) => ({
+
+  const validRows: Array<z.infer<typeof SavedPortRowSchema>> = [];
+  const invalidRowIds: number[] = [];
+
+  for (const rawRow of rawRows) {
+    const parsed = SavedPortRowSchema.safeParse(rawRow);
+    if (!parsed.success || parsed.data.path.trim().length === 0) {
+      const rowId =
+        typeof rawRow.rowid === "number" && Number.isInteger(rawRow.rowid)
+          ? rawRow.rowid
+          : null;
+      if (rowId !== null && rowId >= 0) {
+        invalidRowIds.push(rowId);
+      }
+      continue;
+    }
+    validRows.push(parsed.data);
+  }
+
+  if (invalidRowIds.length > 0) {
+    const placeholders = invalidRowIds.map((_, index) => `?${index + 1}`).join(", ");
+    await execute(
+      `DELETE FROM saved_ports WHERE rowid IN (${placeholders})`,
+      invalidRowIds,
+    );
+  }
+
+  return validRows.map((row) => ({
     path: row.path,
     lastConfig: decodeLastConfig(row.last_config_json ?? undefined),
   }));

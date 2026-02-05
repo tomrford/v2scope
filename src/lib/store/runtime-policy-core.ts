@@ -55,7 +55,7 @@ export const getRuntimeCommandPermissions = (
     setTiming: !stopOnlyMode && facts.haltedCount > 0,
     setTrigger: !stopOnlyMode && hasConnected,
     setRtBuffer: !stopOnlyMode && hasConnected,
-    setChannelMap: !stopOnlyMode && hasConnected,
+    setChannelMap: hasConnected,
     trigger: !stopOnlyMode && hasConnected,
     setRunState: canRequestRun(mode),
     setStopState: canRequestStop(facts),

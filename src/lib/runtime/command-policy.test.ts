@@ -93,7 +93,7 @@ describe("command policy", () => {
     expect(decision.reason).toBe("run_blocked");
   });
 
-  it("in stop-only mode only STOP is allowed", () => {
+  it("in stop-only mode STOP and channel map are allowed", () => {
     const facts = makeFacts({
       controlMode: "mismatch_stop_only",
       mismatchCount: 1,
@@ -110,6 +110,13 @@ describe("command policy", () => {
     );
     expect(setTriggerDecision.allowed).toBe(false);
     expect(setTriggerDecision.reason).toBe("stop_only");
+
+    const channelMapDecision = evaluateCommand(
+      { type: "setChannelMap", channelIdx: 0, catalogIdx: 3 },
+      facts,
+    );
+    expect(channelMapDecision.allowed).toBe(true);
+    expect(channelMapDecision.targetPaths).toEqual(["A", "B"]);
 
     const stopDecision = evaluateCommand(
       { type: "setState", state: State.HALTED, targets: ["A"] },
