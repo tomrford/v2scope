@@ -14,7 +14,6 @@ import type {
 import type { RuntimeDeviceError, RuntimeEvent } from "../runtime/RuntimeService";
 
 export type RuntimeTransportError = Extract<RuntimeDeviceError, { type: "device" }>;
-export type RuntimeMismatchError = Extract<RuntimeDeviceError, { type: "mismatch" }>;
 
 export type DeviceConnectionStatus = "connected" | "disconnected";
 
@@ -60,7 +59,6 @@ export type DeviceSnapshot = {
   path: string;
   status: DeviceConnectionStatus;
   deviceError: RuntimeTransportError | null;
-  mismatchError: RuntimeMismatchError | null;
   info: DeviceInfo | null;
   state: StateResponse | null;
   timing: TimingResponse | null;
@@ -97,7 +95,6 @@ const emptyDevice = (path: string): DeviceSnapshot => ({
   path,
   status: "disconnected",
   deviceError: null,
-  mismatchError: null,
   info: null,
   state: null,
   timing: null,
@@ -146,7 +143,6 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
             ...device,
             status: "connected",
             deviceError: null,
-            mismatchError: null,
             info: event.device.info,
             state: null,
             timing: null,
@@ -173,7 +169,6 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
             ...device,
             status: "disconnected",
             deviceError: null,
-            mismatchError: null,
             state: null,
             timing: null,
             trigger: null,
@@ -205,23 +200,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
-            deviceError:
-              event.error.type === "device" ? event.error : device.deviceError,
-            mismatchError:
-              event.error.type === "mismatch" ? event.error : device.mismatchError,
-          },
-          now,
-        ),
-      );
-      return;
-    }
-    case "deviceErrorCleared": {
-      updateDevice(event.path, (device) =>
-        markSeen(
-          {
-            ...device,
-            deviceError: null,
-            mismatchError: null,
+            deviceError: event.error,
           },
           now,
         ),

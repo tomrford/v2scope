@@ -1,6 +1,7 @@
 import type { SavedPort } from "$lib/ports/schema.js";
 import type { PortInfo } from "$lib/transport/serial.schema.js";
 import type { DeviceSnapshot } from "$lib/store/device-store.js";
+import type { RuntimeMismatch } from "$lib/store/runtime-warnings.js";
 
 /**
  * Combined row data for the saved devices table.
@@ -9,6 +10,7 @@ import type { DeviceSnapshot } from "$lib/store/device-store.js";
 export type SavedDeviceRow = {
   port: SavedPort;
   session: DeviceSnapshot | null;
+  mismatch: RuntimeMismatch | null;
   isActive: boolean;
   portInfo?: PortInfo | null;
 };
@@ -32,10 +34,11 @@ export type AvailablePortRow = {
 export function getDeviceStatus(
   session: DeviceSnapshot | null,
   isActive: boolean,
+  hasMismatch = false,
 ): DeviceStatus {
   if (!isActive) return "deactivated";
   if (!session) return "unknown";
-  if (session.mismatchError || session.deviceError) return "error";
+  if (hasMismatch || session.deviceError) return "error";
   if (session.status === "connected") return "connected";
   return "unknown";
 }
@@ -45,7 +48,7 @@ export function getDeviceStatus(
  * Uses device name from GET_INFO if connected, otherwise falls back to path.
  */
 export function getDeviceDisplayName(row: SavedDeviceRow): string {
-  const status = getDeviceStatus(row.session, row.isActive);
+  const status = getDeviceStatus(row.session, row.isActive, Boolean(row.mismatch));
   if (status === "connected" && row.session?.info?.deviceName) {
     return row.session.info.deviceName;
   }

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { State, TriggerMode } from "../protocol";
 import { evaluateCommand } from "./command-policy";
-import { getCompareMismatchPaths } from "./RuntimeService";
 import type { CommandGuardFacts } from "./command-policy";
 
 const makeFacts = (
@@ -142,20 +141,5 @@ describe("command policy", () => {
     expect(decision.allowed).toBe(true);
     expect(decision.targetPaths).toEqual(["A"]);
     expect(decision.skipped).toContainEqual({ path: "Z", reason: "not_connected" });
-  });
-
-  it("marks baseline path on compare mismatch regression", () => {
-    const twoWay = getCompareMismatchPaths([
-      { path: "A", value: { divider: 1 } },
-      { path: "B", value: { divider: 2 } },
-    ]);
-    expect(Array.from(twoWay).sort()).toEqual(["A", "B"]);
-
-    const threeWay = getCompareMismatchPaths([
-      { path: "A", value: { divider: 1 } },
-      { path: "B", value: { divider: 1 } },
-      { path: "C", value: { divider: 2 } },
-    ]);
-    expect(Array.from(threeWay).sort()).toEqual(["A", "B", "C"]);
   });
 });

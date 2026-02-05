@@ -5,9 +5,13 @@
   import type { RuntimeDeviceError } from "$lib/runtime";
   import type { DeviceStatus } from "./types.js";
 
+  type DeviceStatusError =
+    | RuntimeDeviceError
+    | { type: "mismatch"; message: string };
+
   type Props = {
     status: DeviceStatus;
-    error?: RuntimeDeviceError | null;
+    error?: DeviceStatusError | null;
     hasOverride?: boolean;
   };
 
@@ -31,7 +35,7 @@
   };
 
   const toDeviceErrorDetails = (
-    err: RuntimeDeviceError | null,
+    err: DeviceStatusError | null,
   ): ErrorDetails | null => {
     if (!err) return null;
     if (err.type === "mismatch") {

@@ -12,39 +12,29 @@ describe("device store error lifecycle", () => {
     resetDeviceStore();
   });
 
-  it("keeps mismatch until runtime clears it explicitly", () => {
+  it("stores transport errors from runtime", () => {
     applyDeviceEvent({
       type: "deviceError",
       path: "A",
-      error: { type: "mismatch", message: "state mismatch" },
+      error: { type: "device", error: SerialError.Timeout() },
+    });
+    expect(getDeviceSnapshot("A")?.deviceError).toEqual({
+      type: "device",
+      error: SerialError.Timeout(),
+    });
+  });
+
+  it("clears transport errors on successful updates", () => {
+    applyDeviceEvent({
+      type: "deviceError",
+      path: "A",
+      error: { type: "device", error: SerialError.Timeout() },
     });
     applyDeviceEvent({
       type: "stateUpdated",
       path: "A",
       state: { state: State.HALTED },
     });
-
-    expect(getDeviceSnapshot("A")?.mismatchError).toEqual({
-      type: "mismatch",
-      message: "state mismatch",
-    });
-  });
-
-  it("clears mismatch + transport errors on deviceErrorCleared", () => {
-    applyDeviceEvent({
-      type: "deviceError",
-      path: "A",
-      error: { type: "mismatch", message: "timing mismatch" },
-    });
-    applyDeviceEvent({
-      type: "deviceError",
-      path: "A",
-      error: { type: "device", error: SerialError.Timeout() },
-    });
-
-    applyDeviceEvent({ type: "deviceErrorCleared", path: "A" });
-
-    expect(getDeviceSnapshot("A")?.mismatchError).toBeNull();
     expect(getDeviceSnapshot("A")?.deviceError).toBeNull();
   });
 });

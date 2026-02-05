@@ -3,6 +3,7 @@ import type { PortInfo } from "../transport/serial.schema";
 import { listPorts } from "../runtime/devices";
 import { activePorts, savedPorts } from "./ports";
 import { deviceStore } from "./device-store";
+import { runtimeMismatches } from "./runtime-warnings";
 import type {
   AvailablePortRow,
   SavedDeviceRow,
@@ -48,15 +49,26 @@ export const availablePortsState = writable<AvailablePortsState>({
 export const selectedAvailablePaths = writable<string[]>([]);
 
 export const savedDeviceRows = derived(
-  [savedPorts, activePorts, deviceStore, availablePortsState],
-  ([saved, active, devices, available]): SavedDeviceRow[] => {
+  [savedPorts, activePorts, deviceStore, availablePortsState, runtimeMismatches],
+  ([saved, active, devices, available, mismatches]): SavedDeviceRow[] => {
     const activeSet = new Set(active);
     const portInfoMap = new Map(
       available.ports.map((port) => [port.path, port]),
     );
+
+    const mismatchByPath = new Map<string, (typeof mismatches)[number]>();
+    for (const mismatch of mismatches) {
+      for (const path of mismatch.paths) {
+        if (!mismatchByPath.has(path)) {
+          mismatchByPath.set(path, mismatch);
+        }
+      }
+    }
+
     return saved.map((port) => ({
       port,
       session: devices.get(port.path) ?? null,
+      mismatch: mismatchByPath.get(port.path) ?? null,
       isActive: activeSet.has(port.path),
       portInfo: portInfoMap.get(port.path) ?? null,
     }));
