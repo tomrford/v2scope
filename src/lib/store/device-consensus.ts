@@ -1,8 +1,5 @@
 import { derived } from "svelte/store";
-import type {
-  DeviceSnapshot,
-  DeviceCatalog,
-} from "./device-store";
+import type { DeviceCatalog } from "./device-store";
 import { connectedDevices } from "./device-store";
 import type {
   ChannelMapResponse,
@@ -11,6 +8,7 @@ import type {
   TimingResponse,
   TriggerResponse,
 } from "../protocol";
+import { State } from "../protocol";
 
 type ConsensusValue<T> = {
   value: T | null;
@@ -32,18 +30,49 @@ type StaticConsensus = {
 
 type VariableConsensus = {
   ready: boolean;
+  aligned: boolean;
   names: string[];
   nameToIdxByDevice: Map<string, Map<string, number>>;
 };
 
 type RtConsensus = {
   ready: boolean;
+  aligned: boolean;
+  valuesReady: boolean;
   names: string[];
   entries: Array<{ name: string; value: number | null }>;
   nameToIdxByDevice: Map<string, Map<string, number>>;
 };
 
-type DeviceConsensus = {
+type ConsensusCompleteness = {
+  state: boolean;
+  timing: boolean;
+  trigger: boolean;
+  channelMap: boolean;
+  variables: boolean;
+  rtLabels: boolean;
+  rtValues: boolean;
+};
+
+type ConsensusFlags = {
+  allHalted: boolean;
+  anyNonHalted: boolean;
+  isStateAligned: boolean;
+  hasRunStateMismatch: boolean;
+  hasAnyMismatch: boolean;
+};
+
+type ConsensusMismatches = {
+  staticMismatch: boolean;
+  stateMismatch: boolean;
+  timingMismatch: boolean;
+  triggerMismatch: boolean;
+  channelMapMismatch: boolean;
+  rtMismatch: boolean;
+  catalogMismatch: boolean;
+};
+
+export type DeviceConsensus = {
   staticInfo: StaticConsensus;
   state: ConsensusValue<StateResponse>;
   timing: ConsensusValue<TimingResponse>;
@@ -51,6 +80,9 @@ type DeviceConsensus = {
   channelMap: ConsensusValue<ChannelMapResponse>;
   variables: VariableConsensus;
   rt: RtConsensus;
+  completeness: ConsensusCompleteness;
+  mismatches: ConsensusMismatches;
+  flags: ConsensusFlags;
 };
 
 const compareStaticInfo = (baseline: DeviceInfo, other: DeviceInfo): string[] => {
@@ -81,7 +113,9 @@ const arrayEqual = (a: readonly number[], b: readonly number[]): boolean => {
   return true;
 };
 
-const buildNameToIdx = (list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"]) => {
+const buildNameToIdx = (
+  list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"],
+) => {
   const map = new Map<string, number>();
   if (!list) return map;
   for (let i = 0; i < list.entries.length; i += 1) {
@@ -94,40 +128,81 @@ const buildNameToIdx = (list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels
   return map;
 };
 
-const intersectNames = (
-  baseline: string[],
-  maps: Map<string, number>[],
-): string[] => {
+const intersectNames = (baseline: string[], maps: Map<string, number>[]): string[] => {
   if (baseline.length === 0 || maps.length === 0) return [];
   return baseline.filter((name) => maps.every((m) => m.has(name)));
 };
 
-const varListReady = (devices: DeviceSnapshot[]) =>
-  devices.length > 0 &&
-  devices.every((device) => device.catalog.varList?.entries.length);
+const listReady = (list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"]) => {
+  if (!list) return false;
+  return list.entries.every((entry) => entry !== null);
+};
 
-const rtLabelsReady = (devices: DeviceSnapshot[]) =>
-  devices.length > 0 &&
-  devices.every((device) => device.catalog.rtLabels?.entries.length);
+const listEqual = (
+  left: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"],
+  right: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"],
+) => {
+  if (!left || !right) return false;
+  if (left.totalCount !== right.totalCount) return false;
+  if (left.entries.length !== right.entries.length) return false;
+  for (let i = 0; i < left.entries.length; i += 1) {
+    if (left.entries[i] !== right.entries[i]) return false;
+  }
+  return true;
+};
+
+const emptyConsensus = (): DeviceConsensus => ({
+  staticInfo: {
+    value: null,
+    aligned: false,
+    mismatches: new Map(),
+    compatiblePaths: [],
+  },
+  state: { value: null, aligned: false },
+  timing: { value: null, aligned: false },
+  trigger: { value: null, aligned: false },
+  channelMap: { value: null, aligned: false },
+  variables: { ready: false, aligned: false, names: [], nameToIdxByDevice: new Map() },
+  rt: {
+    ready: false,
+    aligned: false,
+    valuesReady: false,
+    names: [],
+    entries: [],
+    nameToIdxByDevice: new Map(),
+  },
+  completeness: {
+    state: false,
+    timing: false,
+    trigger: false,
+    channelMap: false,
+    variables: false,
+    rtLabels: false,
+    rtValues: false,
+  },
+  mismatches: {
+    staticMismatch: false,
+    stateMismatch: false,
+    timingMismatch: false,
+    triggerMismatch: false,
+    channelMapMismatch: false,
+    rtMismatch: false,
+    catalogMismatch: false,
+  },
+  flags: {
+    allHalted: false,
+    anyNonHalted: false,
+    isStateAligned: false,
+    hasRunStateMismatch: false,
+    hasAnyMismatch: false,
+  },
+});
 
 export const deviceConsensus = derived(
   connectedDevices,
   (devices): DeviceConsensus => {
     if (devices.length === 0) {
-      return {
-        staticInfo: {
-          value: null,
-          aligned: false,
-          mismatches: new Map(),
-          compatiblePaths: [],
-        },
-        state: { value: null, aligned: false },
-        timing: { value: null, aligned: false },
-        trigger: { value: null, aligned: false },
-        channelMap: { value: null, aligned: false },
-        variables: { ready: false, names: [], nameToIdxByDevice: new Map() },
-        rt: { ready: false, names: [], entries: [], nameToIdxByDevice: new Map() },
-      };
+      return emptyConsensus();
     }
 
     const infos = devices.map((device) => device.info).filter(Boolean) as DeviceInfo[];
@@ -150,8 +225,7 @@ export const deviceConsensus = derived(
       }
     }
 
-    const staticInfoAligned =
-      baselineInfo !== null && staticMismatches.size === 0;
+    const staticInfoAligned = baselineInfo !== null && staticMismatches.size === 0;
 
     const staticInfoValue = staticInfoAligned
       ? {
@@ -161,18 +235,20 @@ export const deviceConsensus = derived(
         }
       : null;
 
-    const stateValues = devices
-      .map((device) => device.state)
-      .filter(Boolean) as StateResponse[];
-    const timingValues = devices
-      .map((device) => device.timing)
-      .filter(Boolean) as TimingResponse[];
-    const triggerValues = devices
-      .map((device) => device.trigger)
-      .filter(Boolean) as TriggerResponse[];
-    const channelMapValues = devices
-      .map((device) => device.channelMap)
-      .filter(Boolean) as ChannelMapResponse[];
+    const stateItems = devices.map((device) => device.state);
+    const timingItems = devices.map((device) => device.timing);
+    const triggerItems = devices.map((device) => device.trigger);
+    const channelMapItems = devices.map((device) => device.channelMap);
+
+    const stateComplete = stateItems.every((item) => item !== null);
+    const timingComplete = timingItems.every((item) => item !== null);
+    const triggerComplete = triggerItems.every((item) => item !== null);
+    const channelMapComplete = channelMapItems.every((item) => item !== null);
+
+    const stateValues = stateItems.filter(Boolean) as StateResponse[];
+    const timingValues = timingItems.filter(Boolean) as TimingResponse[];
+    const triggerValues = triggerItems.filter(Boolean) as TriggerResponse[];
+    const channelMapValues = channelMapItems.filter(Boolean) as ChannelMapResponse[];
 
     const stateConsensus = allEqual(
       stateValues,
@@ -195,54 +271,50 @@ export const deviceConsensus = derived(
       (left, right) => arrayEqual(left.varIds, right.varIds),
     );
 
-    const stateAligned =
-      stateConsensus !== null && stateValues.length === devices.length;
-    const timingAligned =
-      timingConsensus !== null && timingValues.length === devices.length;
-    const triggerAligned =
-      triggerConsensus !== null && triggerValues.length === devices.length;
-    const channelMapAligned =
-      channelMapConsensus !== null &&
-      channelMapValues.length === devices.length;
+    const stateAligned = stateComplete && stateConsensus !== null;
+    const timingAligned = timingComplete && timingConsensus !== null;
+    const triggerAligned = triggerComplete && triggerConsensus !== null;
+    const channelMapAligned = channelMapComplete && channelMapConsensus !== null;
 
-    const varReady = varListReady(devices);
+    const variablesReady = devices.every((device) => listReady(device.catalog.varList));
+    const rtLabelsReady = devices.every((device) => listReady(device.catalog.rtLabels));
+
     const varNameToIdxByDevice = new Map<string, Map<string, number>>();
     for (const device of devices) {
-      varNameToIdxByDevice.set(
-        device.path,
-        buildNameToIdx(device.catalog.varList),
-      );
+      varNameToIdxByDevice.set(device.path, buildNameToIdx(device.catalog.varList));
     }
 
-    const baselineVarNames = varReady
-      ? (devices[0].catalog.varList?.entries.filter(Boolean) as string[])
-      : [];
-    const varNames = varReady
-      ? intersectNames(
-          baselineVarNames,
-          Array.from(varNameToIdxByDevice.values()),
-        )
-      : [];
-
-    const rtReady = rtLabelsReady(devices);
     const rtNameToIdxByDevice = new Map<string, Map<string, number>>();
     for (const device of devices) {
-      rtNameToIdxByDevice.set(
-        device.path,
-        buildNameToIdx(device.catalog.rtLabels),
-      );
+      rtNameToIdxByDevice.set(device.path, buildNameToIdx(device.catalog.rtLabels));
     }
 
-    const baselineRtNames = rtReady
-      ? (devices[0].catalog.rtLabels?.entries.filter(Boolean) as string[])
+    const baselineVarEntries = devices[0].catalog.varList;
+    const baselineRtEntries = devices[0].catalog.rtLabels;
+
+    const variableCatalogAligned =
+      variablesReady &&
+      devices.every((device) => listEqual(device.catalog.varList, baselineVarEntries));
+
+    const rtCatalogAligned =
+      rtLabelsReady &&
+      devices.every((device) => listEqual(device.catalog.rtLabels, baselineRtEntries));
+
+    const baselineVarNames = variablesReady
+      ? (devices[0].catalog.varList?.entries.filter(Boolean) as string[])
       : [];
-    const rtNames = rtReady
-      ? intersectNames(
-          baselineRtNames,
-          Array.from(rtNameToIdxByDevice.values()),
-        )
+    const varNames = variablesReady
+      ? intersectNames(baselineVarNames, Array.from(varNameToIdxByDevice.values()))
       : [];
 
+    const baselineRtNames = rtLabelsReady
+      ? (devices[0].catalog.rtLabels?.entries.filter(Boolean) as string[])
+      : [];
+    const rtNames = rtLabelsReady
+      ? intersectNames(baselineRtNames, Array.from(rtNameToIdxByDevice.values()))
+      : [];
+
+    let rtValuesReady = rtLabelsReady;
     const rtEntries = rtNames.map((name) => {
       const values: number[] = [];
       for (const device of devices) {
@@ -250,6 +322,8 @@ export const deviceConsensus = derived(
         const value = idx !== undefined ? device.rtBuffers.get(idx)?.value : undefined;
         if (typeof value === "number") {
           values.push(value);
+        } else {
+          rtValuesReady = false;
         }
       }
 
@@ -260,6 +334,29 @@ export const deviceConsensus = derived(
 
       return { name, value: valueConsensus };
     });
+
+    const staticMismatch = !staticInfoAligned;
+    const stateMismatch = stateComplete && !stateAligned;
+    const timingMismatch = timingComplete && !timingAligned;
+    const triggerMismatch = triggerComplete && !triggerAligned;
+    const channelMapMismatch = channelMapComplete && !channelMapAligned;
+    const rtMismatch = rtValuesReady && rtEntries.some((entry) => entry.value === null);
+    const catalogMismatch =
+      (variablesReady && !variableCatalogAligned) ||
+      (rtLabelsReady && !rtCatalogAligned);
+
+    const allHalted =
+      stateComplete && stateValues.every((state) => state.state === State.HALTED);
+    const anyNonHalted = stateValues.some((state) => state.state !== State.HALTED);
+    const hasRunStateMismatch = stateMismatch;
+    const hasAnyMismatch =
+      staticMismatch ||
+      stateMismatch ||
+      timingMismatch ||
+      triggerMismatch ||
+      channelMapMismatch ||
+      rtMismatch ||
+      catalogMismatch;
 
     return {
       staticInfo: {
@@ -282,15 +379,43 @@ export const deviceConsensus = derived(
         aligned: channelMapAligned,
       },
       variables: {
-        ready: varReady,
+        ready: variablesReady,
+        aligned: variableCatalogAligned,
         names: varNames,
         nameToIdxByDevice: varNameToIdxByDevice,
       },
       rt: {
-        ready: rtReady,
+        ready: rtLabelsReady,
+        aligned: rtCatalogAligned,
+        valuesReady: rtValuesReady,
         names: rtNames,
         entries: rtEntries,
         nameToIdxByDevice: rtNameToIdxByDevice,
+      },
+      completeness: {
+        state: stateComplete,
+        timing: timingComplete,
+        trigger: triggerComplete,
+        channelMap: channelMapComplete,
+        variables: variablesReady,
+        rtLabels: rtLabelsReady,
+        rtValues: rtValuesReady,
+      },
+      mismatches: {
+        staticMismatch,
+        stateMismatch,
+        timingMismatch,
+        triggerMismatch,
+        channelMapMismatch,
+        rtMismatch,
+        catalogMismatch,
+      },
+      flags: {
+        allHalted,
+        anyNonHalted,
+        isStateAligned: stateAligned,
+        hasRunStateMismatch,
+        hasAnyMismatch,
       },
     };
   },

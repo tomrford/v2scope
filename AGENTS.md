@@ -32,6 +32,7 @@ Message families: GET_INFO, GET/SET_TIMING, GET/SET_STATE, TRIGGER, GET_FRAME, G
 bun run dev      # dev server
 bun run build    # production build
 bun run check    # svelte-check + tsc
+bun pm view <pkg>  # dependency metadata checks
 cargo check      # rust check (in src-tauri)
 cargo fmt        # rust format
 bunx prettier --write .  # ts/svelte format

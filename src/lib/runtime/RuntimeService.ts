@@ -42,33 +42,43 @@ export type RuntimeCommand =
   | { readonly type: "disconnect"; readonly path: string }
   | { readonly type: "pollState"; readonly queuedAt: number }
   | { readonly type: "pollFrame"; readonly queuedAt: number }
-  | { readonly type: "setState"; readonly state: State }
-  | { readonly type: "trigger" }
+  | {
+      readonly type: "setState";
+      readonly state: State;
+      readonly targets?: readonly string[];
+    }
+  | {
+      readonly type: "trigger";
+      readonly targets?: readonly string[];
+    }
   | {
       readonly type: "setTiming";
       readonly divider: number;
       readonly preTrig: number;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setChannelMap";
       readonly channelIdx: number;
       readonly catalogIdx: number;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setTrigger";
       readonly threshold: number;
       readonly channel: number;
       readonly mode: TriggerMode;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setRtBuffer";
       readonly index: number;
       readonly value: number;
+      readonly targets?: readonly string[];
     };
 
 export type RuntimeDeviceError =
-  | { readonly type: "device"; readonly error: DeviceError }
-  | { readonly type: "mismatch"; readonly message: string };
+  | { readonly type: "device"; readonly error: DeviceError };
 
 export type RuntimeEvent =
   | { readonly type: "deviceConnected"; readonly device: ConnectedDevice }
@@ -141,9 +151,6 @@ export class RuntimeService extends Context.Tag("RuntimeService")<
   RuntimeServiceShape
 >() {}
 
-const isEqual = (a: unknown, b: unknown): boolean =>
-  JSON.stringify(a) === JSON.stringify(b);
-
 const errorTag = (error: DeviceError): string | null => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = (error as { _tag?: string })._tag;
@@ -209,15 +216,19 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
         updateSession(path, (session) => ({ ...session, error: null }));
 
       const runOnDevices = <T>(
-        label: string,
         run: (device: ConnectedDevice) => Effect.Effect<T, DeviceError>,
-        compare: boolean,
         retryCount: number,
         dropRetryableErrors: boolean,
         onSuccess: (path: string, value: T) => Effect.Effect<void, never>,
+        targets?: readonly string[],
       ): Effect.Effect<void, never> =>
         Effect.gen(function* () {
-          const list = yield* getSessionList();
+          const rawList = yield* getSessionList();
+          const targetSet =
+            targets && targets.length > 0 ? new Set(targets) : null;
+          const list = targetSet
+            ? rawList.filter((session) => targetSet.has(session.device.path))
+            : rawList;
           if (list.length === 0) return;
 
           const results = yield* Effect.forEach(
@@ -240,25 +251,8 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               "value" in r,
           );
 
-          const mismatched = new Set<string>();
-          if (compare && successes.length > 1) {
-            const baseline = successes[0].value;
-            for (const item of successes.slice(1)) {
-              if (!isEqual(baseline, item.value)) {
-                mismatched.add(item.path);
-              }
-            }
-          }
-
           for (const item of successes) {
-            if (mismatched.has(item.path)) {
-              yield* setDeviceError(item.path, {
-                type: "mismatch",
-                message: `${label} mismatch`,
-              });
-            } else {
-              yield* clearDeviceError(item.path);
-            }
+            yield* clearDeviceError(item.path);
             yield* onSuccess(item.path, item.value);
           }
 
@@ -424,12 +418,11 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
             return disconnectDevice(cmd.path);
           case "pollState":
             return runOnDevices(
-              "state",
               (device) => deviceService.getState(device.handle),
-              true,
               statePollRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
+              undefined,
             );
           case "pollFrame":
             return Effect.gen(function* () {
@@ -446,40 +439,36 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               }
 
               yield* runOnDevices(
-                "frame",
                 (device) => deviceService.getFrame(device.handle, device.info),
-                false,
                 framePollRetryCount,
                 true,
                 (path, frame) => emit({ type: "frameUpdated", path, frame }),
+                undefined,
               );
             });
           case "setState":
             return runOnDevices(
-              "setState",
               (device) =>
                 deviceService
                   .setState(device.handle, cmd.state)
                   .pipe(
                     Effect.flatMap(() => deviceService.getState(device.handle)),
                   ),
-              true,
               commandRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
+              cmd.targets,
             );
           case "trigger":
             return runOnDevices(
-              "trigger",
               (device) => deviceService.trigger(device.handle),
-              false,
               commandRetryCount,
               false,
               () => Effect.succeed(undefined),
+              cmd.targets,
             );
           case "setTiming":
             return runOnDevices(
-              "setTiming",
               (device) =>
                 deviceService
                   .setTiming(
@@ -493,14 +482,13 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                       deviceService.getTiming(device.handle, device.info),
                     ),
                   ),
-              true,
               commandRetryCount,
               false,
               (path, timing) => emit({ type: "timingUpdated", path, timing }),
+              cmd.targets,
             );
           case "setChannelMap":
             return runOnDevices(
-              "setChannelMap",
               (device) =>
                 deviceService
                   .setChannelMap(device.handle, cmd.channelIdx, cmd.catalogIdx)
@@ -509,14 +497,13 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                       deviceService.getChannelMap(device.handle, device.info),
                     ),
                   ),
-              true,
               commandRetryCount,
               false,
               (path, map) => emit({ type: "channelMapUpdated", path, map }),
+              cmd.targets,
             );
           case "setTrigger":
             return runOnDevices(
-              "setTrigger",
               (device) =>
                 deviceService
                   .setTrigger(
@@ -531,15 +518,14 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                       deviceService.getTrigger(device.handle, device.info),
                     ),
                   ),
-              true,
               commandRetryCount,
               false,
               (path, trigger) =>
                 emit({ type: "triggerUpdated", path, trigger }),
+              cmd.targets,
             );
           case "setRtBuffer":
             return runOnDevices(
-              "setRtBuffer",
               (device) =>
                 deviceService
                   .setRtBuffer(device.handle, device.info, cmd.index, cmd.value)
@@ -552,11 +538,11 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                       ),
                     ),
                   ),
-              false,
               commandRetryCount,
               false,
               (path, rt) =>
                 emit({ type: "rtBufferUpdated", path, index: cmd.index, rt }),
+              cmd.targets,
             );
         }
       };

@@ -84,16 +84,16 @@
   let plotDataArrays = $state.raw<uPlot.AlignedData[]>([]);
 
   const assignColors = (paths: string[]) => {
-    const used = new Set<string>(Object.values(colorMap));
+    const used = [...Object.values(colorMap)];
     let paletteIndex = 0;
     const pickColor = () => {
-      while (paletteIndex < colors.length && used.has(colors[paletteIndex])) {
+      while (paletteIndex < colors.length && used.includes(colors[paletteIndex])) {
         paletteIndex += 1;
       }
       if (paletteIndex < colors.length) {
         const color = colors[paletteIndex];
         paletteIndex += 1;
-        used.add(color);
+        used.push(color);
         return color;
       }
       return colors[paths.length % colors.length];

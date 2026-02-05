@@ -32,8 +32,20 @@
       header: "Status",
       cell: ({ row }) =>
         renderComponent(DeviceStatusBadge, {
-          status: getDeviceStatus(row.original.session, row.original.isActive),
-          error: row.original.session?.error ?? null,
+          status: getDeviceStatus(
+            row.original.session,
+            row.original.isActive,
+            Boolean(row.original.mismatch),
+          ),
+          error:
+            (row.original.mismatch
+              ? {
+                  type: "mismatch",
+                  message: row.original.mismatch.message,
+                }
+              : null) ??
+            row.original.session?.deviceError ??
+            null,
           hasOverride: Boolean(row.original.port.lastConfig),
         }),
     },
