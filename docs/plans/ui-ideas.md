@@ -1,7 +1,5 @@
-settings page uses radio groups for the fixed enum options of serial settings
+# UI Ideas (Archived)
 
-'item' for wrapping graphs
-
-spinner for loading
-
-tanstack table core for the tables? https://www.shadcn-svelte.com/docs/components/data-table
+- Table UI uses shadcn data-table components.
+- Spinner component in use for loading states.
+- New UI ideas should move into `docs/plans/ui-schema.md` or `docs/todos.md`.

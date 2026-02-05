@@ -42,28 +42,39 @@ export type RuntimeCommand =
   | { readonly type: "disconnect"; readonly path: string }
   | { readonly type: "pollState"; readonly queuedAt: number }
   | { readonly type: "pollFrame"; readonly queuedAt: number }
-  | { readonly type: "setState"; readonly state: State }
-  | { readonly type: "trigger" }
+  | {
+      readonly type: "setState";
+      readonly state: State;
+      readonly targets?: readonly string[];
+    }
+  | {
+      readonly type: "trigger";
+      readonly targets?: readonly string[];
+    }
   | {
       readonly type: "setTiming";
       readonly divider: number;
       readonly preTrig: number;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setChannelMap";
       readonly channelIdx: number;
       readonly catalogIdx: number;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setTrigger";
       readonly threshold: number;
       readonly channel: number;
       readonly mode: TriggerMode;
+      readonly targets?: readonly string[];
     }
   | {
       readonly type: "setRtBuffer";
       readonly index: number;
       readonly value: number;
+      readonly targets?: readonly string[];
     };
 
 export type RuntimeDeviceError =
@@ -73,6 +84,7 @@ export type RuntimeDeviceError =
 export type RuntimeEvent =
   | { readonly type: "deviceConnected"; readonly device: ConnectedDevice }
   | { readonly type: "deviceDisconnected"; readonly path: string }
+  | { readonly type: "deviceErrorCleared"; readonly path: string }
   | { readonly type: "frameTick"; readonly queuedAt: number }
   | {
       readonly type: "deviceError";
@@ -144,6 +156,30 @@ export class RuntimeService extends Context.Tag("RuntimeService")<
 const isEqual = (a: unknown, b: unknown): boolean =>
   JSON.stringify(a) === JSON.stringify(b);
 
+type CompareSuccess<T> = { readonly path: string; readonly value: T };
+
+export const getCompareMismatchPaths = <T>(
+  successes: readonly CompareSuccess<T>[],
+): Set<string> => {
+  const mismatched = new Set<string>();
+  if (successes.length <= 1) return mismatched;
+
+  const baseline = successes[0].value;
+  let hasMismatch = false;
+  for (const item of successes.slice(1)) {
+    if (!isEqual(baseline, item.value)) {
+      hasMismatch = true;
+      break;
+    }
+  }
+
+  if (!hasMismatch) return mismatched;
+  for (const item of successes) {
+    mismatched.add(item.path);
+  }
+  return mismatched;
+};
+
 const errorTag = (error: DeviceError): string | null => {
   if (typeof error === "object" && error !== null && "_tag" in error) {
     const tag = (error as { _tag?: string })._tag;
@@ -206,7 +242,10 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
         );
 
       const clearDeviceError = (path: string) =>
-        updateSession(path, (session) => ({ ...session, error: null }));
+        updateSession(path, (session) => ({ ...session, error: null })).pipe(
+          Effect.tap(() => emit({ type: "deviceErrorCleared", path })),
+          Effect.ignore,
+        );
 
       const runOnDevices = <T>(
         label: string,
@@ -215,9 +254,15 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
         retryCount: number,
         dropRetryableErrors: boolean,
         onSuccess: (path: string, value: T) => Effect.Effect<void, never>,
+        targets?: readonly string[],
       ): Effect.Effect<void, never> =>
         Effect.gen(function* () {
-          const list = yield* getSessionList();
+          const rawList = yield* getSessionList();
+          const targetSet =
+            targets && targets.length > 0 ? new Set(targets) : null;
+          const list = targetSet
+            ? rawList.filter((session) => targetSet.has(session.device.path))
+            : rawList;
           if (list.length === 0) return;
 
           const results = yield* Effect.forEach(
@@ -240,15 +285,9 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               "value" in r,
           );
 
-          const mismatched = new Set<string>();
-          if (compare && successes.length > 1) {
-            const baseline = successes[0].value;
-            for (const item of successes.slice(1)) {
-              if (!isEqual(baseline, item.value)) {
-                mismatched.add(item.path);
-              }
-            }
-          }
+          const mismatched = compare
+            ? getCompareMismatchPaths(successes)
+            : new Set<string>();
 
           for (const item of successes) {
             if (mismatched.has(item.path)) {
@@ -430,6 +469,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               statePollRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
+              undefined,
             );
           case "pollFrame":
             return Effect.gen(function* () {
@@ -452,6 +492,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                 framePollRetryCount,
                 true,
                 (path, frame) => emit({ type: "frameUpdated", path, frame }),
+                undefined,
               );
             });
           case "setState":
@@ -467,6 +508,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               commandRetryCount,
               false,
               (path, state) => emit({ type: "stateUpdated", path, state }),
+              cmd.targets,
             );
           case "trigger":
             return runOnDevices(
@@ -476,6 +518,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               commandRetryCount,
               false,
               () => Effect.succeed(undefined),
+              cmd.targets,
             );
           case "setTiming":
             return runOnDevices(
@@ -497,6 +540,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               commandRetryCount,
               false,
               (path, timing) => emit({ type: "timingUpdated", path, timing }),
+              cmd.targets,
             );
           case "setChannelMap":
             return runOnDevices(
@@ -513,6 +557,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               commandRetryCount,
               false,
               (path, map) => emit({ type: "channelMapUpdated", path, map }),
+              cmd.targets,
             );
           case "setTrigger":
             return runOnDevices(
@@ -536,6 +581,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               false,
               (path, trigger) =>
                 emit({ type: "triggerUpdated", path, trigger }),
+              cmd.targets,
             );
           case "setRtBuffer":
             return runOnDevices(
@@ -557,6 +603,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
               false,
               (path, rt) =>
                 emit({ type: "rtBufferUpdated", path, index: cmd.index, rt }),
+              cmd.targets,
             );
         }
       };

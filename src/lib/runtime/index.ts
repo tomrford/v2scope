@@ -27,6 +27,25 @@ export {
   enqueueRuntimeCommand,
   runRuntimeEffect,
 } from "../store/runtime";
+export {
+  runtimeControlMode,
+  runtimeCommandPermissions,
+  runtimeCanRequestRun,
+  runtimeCanRequestStop,
+  runtimeStopOnly,
+  runtimePolicyFacts,
+} from "../store/runtime-policy.svelte";
+export { runtimeMismatches } from "../store/runtime-warnings";
+export type {
+  RuntimeMismatch,
+  RuntimeMismatchCode,
+} from "../store/runtime-warnings";
+export type { ControlMode } from "../store/runtime-policy-core";
+export {
+  enqueueGuardedCommand,
+  evaluateCommand,
+  type GuardDecision,
+} from "./command-policy";
 
 export {
   listPorts,

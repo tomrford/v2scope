@@ -13,6 +13,9 @@ import type {
 } from "../protocol";
 import type { RuntimeDeviceError, RuntimeEvent } from "../runtime/RuntimeService";
 
+export type RuntimeTransportError = Extract<RuntimeDeviceError, { type: "device" }>;
+export type RuntimeMismatchError = Extract<RuntimeDeviceError, { type: "mismatch" }>;
+
 export type DeviceConnectionStatus = "connected" | "disconnected";
 
 export type DeviceSyncStatus = "idle" | "loading" | "ready" | "error";
@@ -56,7 +59,8 @@ export type DeviceUpdateTimestamps = {
 export type DeviceSnapshot = {
   path: string;
   status: DeviceConnectionStatus;
-  error: RuntimeDeviceError | null;
+  deviceError: RuntimeTransportError | null;
+  mismatchError: RuntimeMismatchError | null;
   info: DeviceInfo | null;
   state: StateResponse | null;
   timing: TimingResponse | null;
@@ -92,7 +96,8 @@ const emptySync = (): DeviceSyncState => ({
 const emptyDevice = (path: string): DeviceSnapshot => ({
   path,
   status: "disconnected",
-  error: null,
+  deviceError: null,
+  mismatchError: null,
   info: null,
   state: null,
   timing: null,
@@ -140,7 +145,8 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
           {
             ...device,
             status: "connected",
-            error: null,
+            deviceError: null,
+            mismatchError: null,
             info: event.device.info,
             state: null,
             timing: null,
@@ -166,7 +172,8 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
           {
             ...device,
             status: "disconnected",
-            error: null,
+            deviceError: null,
+            mismatchError: null,
             state: null,
             timing: null,
             trigger: null,
@@ -198,7 +205,23 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
-            error: event.error,
+            deviceError:
+              event.error.type === "device" ? event.error : device.deviceError,
+            mismatchError:
+              event.error.type === "mismatch" ? event.error : device.mismatchError,
+          },
+          now,
+        ),
+      );
+      return;
+    }
+    case "deviceErrorCleared": {
+      updateDevice(event.path, (device) =>
+        markSeen(
+          {
+            ...device,
+            deviceError: null,
+            mismatchError: null,
           },
           now,
         ),
@@ -210,6 +233,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
+            deviceError: null,
             state: event.state,
             sync: { ...device.sync, state: "ready" },
             updatedAt: { ...device.updatedAt, state: now },
@@ -224,6 +248,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
+            deviceError: null,
             frame: event.frame,
             sync: { ...device.sync, frame: "ready" },
             updatedAt: { ...device.updatedAt, frame: now },
@@ -251,6 +276,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
+            deviceError: null,
             timing: event.timing,
             sync: { ...device.sync, timing: "ready" },
             updatedAt: { ...device.updatedAt, timing: now },
@@ -265,6 +291,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
+            deviceError: null,
             channelMap: event.map,
             sync: { ...device.sync, channelMap: "ready" },
             updatedAt: { ...device.updatedAt, channelMap: now },
@@ -279,6 +306,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         markSeen(
           {
             ...device,
+            deviceError: null,
             trigger: event.trigger,
             sync: { ...device.sync, trigger: "ready" },
             updatedAt: { ...device.updatedAt, trigger: now },
@@ -300,6 +328,7 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
         return markSeen(
           {
             ...device,
+            deviceError: null,
             rtBuffers: nextBuffers,
             sync: { ...device.sync, rtBuffers: "ready" },
             updatedAt: { ...device.updatedAt, rtBuffers: nextRtTimes },
@@ -359,6 +388,7 @@ export function applyVarList(path: string, response: VarListResponse): void {
     markSeen(
       {
         ...device,
+        deviceError: null,
         catalog: {
           ...device.catalog,
           varList: applyLabelPage(device.catalog.varList, page),
@@ -378,6 +408,7 @@ export function applyRtLabels(path: string, response: RtLabelsResponse): void {
     markSeen(
       {
         ...device,
+        deviceError: null,
         catalog: {
           ...device.catalog,
           rtLabels: applyLabelPage(device.catalog.rtLabels, page),

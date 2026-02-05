@@ -35,7 +35,7 @@ export function getDeviceStatus(
 ): DeviceStatus {
   if (!isActive) return "deactivated";
   if (!session) return "unknown";
-  if (session.error) return "error";
+  if (session.mismatchError || session.deviceError) return "error";
   if (session.status === "connected") return "connected";
   return "unknown";
 }
