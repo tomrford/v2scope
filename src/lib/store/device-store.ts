@@ -320,6 +320,9 @@ export function applyDeviceEvent(event: RuntimeEvent): void {
     case "frameTick": {
       return;
     }
+    case "runtimeLog": {
+      return;
+    }
     case "varListUpdated": {
       // Handled separately in runtime.ts via applyVarList
       return;

@@ -9,7 +9,10 @@
   import RunStopButton from "$lib/components/scope/run-stop-button.svelte";
   import { frameTick } from "$lib/store/runtime";
   import { connectedDevices } from "$lib/store/device-store";
-  import { deviceConsensus } from "$lib/store/device-consensus";
+  import {
+    consensusStaticInfo,
+    consensusChannelMap,
+  } from "$lib/store/device-consensus";
   import { settings } from "$lib/settings";
   import type uPlot from "uplot";
 
@@ -45,7 +48,7 @@
   const ringConfig = $derived({
     frameHz: $settings.framePollingHz,
     durationS: $settings.liveBufferDurationS,
-    channels: $deviceConsensus.staticInfo.value?.numChannels ?? 0,
+    channels: $consensusStaticInfo.value?.numChannels ?? 0,
     size: Math.max(
       1,
       Math.round($settings.framePollingHz * $settings.liveBufferDurationS),
@@ -138,7 +141,7 @@
     const { size, channels, frameHz } = ringConfig;
     const currentSessions = sessions;
     const paths = currentSessions.map((s) => s.path);
-    const channelMapLen = $deviceConsensus.channelMap.value?.varIds?.length ?? 0;
+    const channelMapLen = $consensusChannelMap.value?.varIds?.length ?? 0;
 
     if (channels <= 0 || paths.length === 0 || channelMapLen < channels) {
       layoutKey = "";
@@ -201,7 +204,7 @@
 
   // Clear channel buffers when channel map changes
   $effect(() => {
-    const channelMap = $deviceConsensus.channelMap.value?.varIds ?? null;
+    const channelMap = $consensusChannelMap.value?.varIds ?? null;
     if (!channelMap) {
       lastChannelMap = null;
       return;

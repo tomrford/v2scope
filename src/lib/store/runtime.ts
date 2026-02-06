@@ -13,6 +13,10 @@ import {
   applyVarList,
   resetDeviceStore,
 } from "./device-store";
+import {
+  appendRuntimeLog,
+  clearRuntimeLogs,
+} from "./runtime-logs";
 
 type RuntimeInstance = {
   runPromise: <A, E>(
@@ -40,6 +44,10 @@ const applyEvent = (event: RuntimeEvent): void => {
       applyRtLabels(event.path, event.response);
       return;
     }
+    case "runtimeLog": {
+      appendRuntimeLog({ at: event.at, message: event.message });
+      return;
+    }
   }
 };
 
@@ -62,6 +70,7 @@ export async function startRuntimeStores(
   }
 
   resetDeviceStore();
+  clearRuntimeLogs();
   runtime = runtimeInstance;
 
   eventLoopPromise = runtime.runPromise(eventLoop);
@@ -76,6 +85,7 @@ export async function stopRuntimeStores(): Promise<void> {
   runtime = null;
   eventLoopPromise = null;
   resetDeviceStore();
+  clearRuntimeLogs();
 }
 
 export async function runRuntimeEffect<A, E>(

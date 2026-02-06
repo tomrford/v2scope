@@ -56,9 +56,6 @@ See `docs/plans/` for detailed specs:
 ## TODOs
 
 - TS/UI: update GET_SNAPSHOT_DATA decode + requests for sample-major ordering (contiguous chunks).
-- TS/UI: update GET_VAR_LIST/GET_RT_LABELS decode + request payloads (required start/count, no per-entry id).
-- TS/UI: parse GET_INFO endianness + swap all multi-byte fields when host endianness differs.
-- UI: poll available ports list instead of manual refresh.
 - Settings: enforce max live buffer size (derived from frame polling Hz + duration).
 - Settings: consider exposing only buffer duration; cap internal sampling frequency to honor max buffer size (drop Hz as duration grows).
 

@@ -4,17 +4,20 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { TriggerMode } from "$lib/protocol/types";
-  import { deviceConsensus } from "$lib/store/device-consensus";
+  import {
+    consensusStaticInfo,
+    consensusTrigger,
+    consensusVariables,
+    consensusChannelMap,
+  } from "$lib/store/device-consensus";
   import { runtimeCommandPermissions } from "$lib/store/runtime-policy.svelte";
   import { enqueueGuardedCommand } from "$lib/runtime/command-policy";
 
-  const consensus = $derived($deviceConsensus);
+  const trigger = $derived($consensusTrigger.value);
+  const numChannels = $derived($consensusStaticInfo.value?.numChannels ?? 0);
+  const variables = $derived($consensusVariables.entries);
+  const channelMap = $derived($consensusChannelMap.value?.varIds ?? []);
   const permissions = $derived($runtimeCommandPermissions);
-
-  const trigger = $derived(consensus.trigger.value);
-  const numChannels = $derived(consensus.staticInfo.value?.numChannels ?? 0);
-  const variables = $derived(consensus.variables.entries);
-  const channelMap = $derived(consensus.channelMap.value?.varIds ?? []);
 
   const modeOptions: Array<{ value: TriggerMode; label: string }> = [
     { value: TriggerMode.DISABLED, label: "Disabled" },

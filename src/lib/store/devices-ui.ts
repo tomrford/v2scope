@@ -1,4 +1,4 @@
-import { derived, writable } from "svelte/store";
+import { derived, writable, get } from "svelte/store";
 import type { PortInfo } from "../transport/serial.schema";
 import { listPorts } from "../runtime/devices";
 import { activePorts, savedPorts } from "./ports";
@@ -86,11 +86,15 @@ export const availablePortRows = derived(
 );
 
 export async function refreshAvailablePorts(): Promise<void> {
-  availablePortsState.update((state) => ({
-    ...state,
-    status: "loading",
+  const previous = get(availablePortsState);
+  const shouldShowLoading =
+    previous.status === "idle" || previous.ports.length === 0;
+
+  availablePortsState.set({
+    ...previous,
+    status: shouldShowLoading ? "loading" : "ready",
     error: null,
-  }));
+  });
 
   try {
     const ports = await listPorts();
@@ -102,10 +106,21 @@ export async function refreshAvailablePorts(): Promise<void> {
       updatedAt: Date.now(),
     });
   } catch (error) {
+    const message = toErrorMessage(error);
+    if (!shouldShowLoading && previous.ports.length > 0) {
+      availablePortsState.set({
+        status: "ready",
+        ports: previous.ports,
+        error: message,
+        updatedAt: Date.now(),
+      });
+      return;
+    }
+
     availablePortsState.set({
       status: "error",
       ports: [],
-      error: toErrorMessage(error),
+      error: message,
       updatedAt: Date.now(),
     });
   }

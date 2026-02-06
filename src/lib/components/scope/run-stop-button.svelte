@@ -1,18 +1,17 @@
 <script lang="ts">
   import { Button } from "$lib/components/ui/button";
   import { State } from "$lib/protocol/types";
-  import { deviceConsensus } from "$lib/store/device-consensus";
+  import { consensusState } from "$lib/store/device-consensus";
   import {
     runtimeCanRequestRun,
     runtimeCanRequestStop,
   } from "$lib/store/runtime-policy.svelte";
   import { enqueueGuardedCommand } from "$lib/runtime/command-policy";
 
-  const consensus = $derived($deviceConsensus);
   const canRun = $derived($runtimeCanRequestRun);
   const canStop = $derived($runtimeCanRequestStop);
 
-  const currentState = $derived(consensus.state.value?.state ?? null);
+  const currentState = $derived($consensusState.value?.state ?? null);
   const isHalted = $derived(currentState === State.HALTED);
 
   const indicatorColor = $derived.by(() => {

@@ -36,6 +36,7 @@ export {
   runtimePolicyFacts,
 } from "../store/runtime-policy.svelte";
 export { runtimeMismatches } from "../store/runtime-warnings";
+export { runtimeLogs, clearRuntimeLogs } from "../store/runtime-logs";
 export type {
   RuntimeMismatch,
   RuntimeMismatchCode,

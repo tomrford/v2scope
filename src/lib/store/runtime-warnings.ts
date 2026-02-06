@@ -1,6 +1,9 @@
 import { derived } from "svelte/store";
 import { connectedDevices } from "./device-store";
-import { deviceConsensus } from "./device-consensus";
+import {
+  consensusMismatches,
+  consensusStaticInfo,
+} from "./device-consensus";
 import {
   buildRuntimeMismatches,
   type RuntimeMismatch,
@@ -10,17 +13,17 @@ import {
 export type { RuntimeMismatch, RuntimeMismatchCode };
 
 export const runtimeMismatches = derived(
-  [connectedDevices, deviceConsensus],
-  ([$connectedDevices, $consensus]): RuntimeMismatch[] => {
+  [connectedDevices, consensusMismatches, consensusStaticInfo],
+  ([$connectedDevices, $mismatches, $staticInfo]): RuntimeMismatch[] => {
     const allPaths = $connectedDevices.map((device) => device.path);
     const staticMismatchPaths =
-      $consensus.staticInfo.mismatches.size > 0 ? allPaths : [];
+      $staticInfo.mismatches.size > 0 ? allPaths : [];
 
     return buildRuntimeMismatches({
       allPaths,
       staticMismatchPaths,
       updatedAt: Date.now(),
-      mismatches: $consensus.mismatches,
+      mismatches: $mismatches,
     });
   },
 );
