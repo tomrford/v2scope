@@ -2,7 +2,7 @@
   import * as Popover from "$lib/components/ui/popover";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { deviceConsensus } from "$lib/store/device-consensus";
+  import { consensusRt } from "$lib/store/device-consensus";
   import { connectedDevices } from "$lib/store/device-store";
   import { runtimeCommandPermissions } from "$lib/store/runtime-policy.svelte";
   import { enqueueGuardedCommand } from "$lib/runtime/command-policy";
@@ -13,13 +13,13 @@
     value: number | null;
   };
 
-  const consensus = $derived($deviceConsensus);
+  const rt = $derived($consensusRt);
   const sessions = $derived($connectedDevices);
   const permissions = $derived($runtimeCommandPermissions);
 
   const entries = $derived.by((): RtEntry[] => {
-    if (consensus.rt.entries.length > 0) {
-      return consensus.rt.entries;
+    if (rt.entries.length > 0) {
+      return rt.entries;
     }
 
     if (sessions.length !== 1) return [];

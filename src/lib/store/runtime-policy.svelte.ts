@@ -2,7 +2,10 @@ import { FiniteStateMachine } from "runed";
 import { derived } from "svelte/store";
 import { State } from "../protocol";
 import { connectedDevices } from "./device-store";
-import { deviceConsensus } from "./device-consensus";
+import {
+  consensusCompleteness,
+  consensusFlags,
+} from "./device-consensus";
 import { runtimeMismatches } from "./runtime-warnings";
 import {
   canRequestRun,
@@ -46,8 +49,8 @@ const fsm = new FiniteStateMachine<ControlMode, "EVALUATE">("empty", {
 });
 
 export const runtimePolicyFacts = derived(
-  [connectedDevices, deviceConsensus, runtimeMismatches],
-  ([$connectedDevices, $consensus, $runtimeMismatches]): RuntimePolicyFacts => {
+  [connectedDevices, consensusCompleteness, consensusFlags, runtimeMismatches],
+  ([$connectedDevices, $completeness, $flags, $runtimeMismatches]): RuntimePolicyFacts => {
     const connectedCount = $connectedDevices.length;
     const haltedCount = $connectedDevices.filter(
       (device) => device.state?.state === State.HALTED,
@@ -57,12 +60,12 @@ export const runtimePolicyFacts = derived(
       connectedCount,
       haltedCount,
       hasMissingData:
-        connectedCount > 0 && !requiredComplete($consensus.completeness),
-      hasRunStateMismatch: $consensus.flags.hasRunStateMismatch,
+        connectedCount > 0 && !requiredComplete($completeness),
+      hasRunStateMismatch: $flags.hasRunStateMismatch,
       hasAnyMismatch:
-        $consensus.flags.hasAnyMismatch || $runtimeMismatches.length > 0,
-      allHalted: $consensus.flags.allHalted,
-      anyNonHalted: $consensus.flags.anyNonHalted,
+        $flags.hasAnyMismatch || $runtimeMismatches.length > 0,
+      allHalted: $flags.allHalted,
+      anyNonHalted: $flags.anyNonHalted,
     };
   },
 );

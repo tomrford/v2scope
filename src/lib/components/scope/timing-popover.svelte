@@ -2,15 +2,16 @@
   import * as Popover from "$lib/components/ui/popover";
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
-  import { deviceConsensus } from "$lib/store/device-consensus";
+  import {
+    consensusStaticInfo,
+    consensusTiming,
+  } from "$lib/store/device-consensus";
   import { runtimeCommandPermissions } from "$lib/store/runtime-policy.svelte";
   import { enqueueGuardedCommand } from "$lib/runtime/command-policy";
 
-  const consensus = $derived($deviceConsensus);
+  const staticInfo = $derived($consensusStaticInfo.value);
+  const timing = $derived($consensusTiming.value);
   const permissions = $derived($runtimeCommandPermissions);
-
-  const staticInfo = $derived(consensus.staticInfo.value);
-  const timing = $derived(consensus.timing.value);
 
   const storeDurationS = $derived(
     timing && staticInfo
