@@ -81,6 +81,11 @@ export type RuntimeDeviceError =
   | { readonly type: "device"; readonly error: DeviceError };
 
 export type RuntimeEvent =
+  | {
+      readonly type: "runtimeLog";
+      readonly at: number;
+      readonly message: string;
+    }
   | { readonly type: "deviceConnected"; readonly device: ConnectedDevice }
   | { readonly type: "deviceDisconnected"; readonly path: string }
   | { readonly type: "frameTick"; readonly queuedAt: number }
@@ -190,6 +195,12 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
 
       const emit = (event: RuntimeEvent) =>
         Queue.offer(events, event).pipe(Effect.ignore);
+      const emitLog = (message: string) =>
+        emit({
+          type: "runtimeLog",
+          at: Date.now(),
+          message,
+        });
 
       const getSessionList = () =>
         Ref.get(sessions).pipe(
@@ -303,13 +314,24 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const fetchVarList = (device: ConnectedDevice) =>
         Effect.gen(function* () {
           const info = device.info;
-          const maxCount = maxNameEntries(info.nameLen);
+          const maxPerPage = maxNameEntries(info.nameLen);
           let start = 0;
           let total = info.varCount;
 
           while (start < total) {
+            const remaining = Math.max(0, total - start);
+            const requestCount = Math.max(1, Math.min(maxPerPage, remaining));
+            yield* emitLog(
+              `[${device.path}] TX GET_VAR_LIST start=${start} count=${requestCount}`,
+            );
             const page = yield* withRetry(
-              () => deviceService.getVarList(device.handle, info, start, maxCount),
+              () =>
+                deviceService.getVarList(
+                  device.handle,
+                  info,
+                  start,
+                  requestCount,
+                ),
               commandRetryCount,
             );
             yield* emit({
@@ -329,14 +351,24 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const fetchRtLabels = (device: ConnectedDevice) =>
         Effect.gen(function* () {
           const info = device.info;
-          const maxCount = maxNameEntries(info.nameLen);
+          const maxPerPage = maxNameEntries(info.nameLen);
           let start = 0;
           let total = info.rtCount;
 
           while (start < total) {
+            const remaining = Math.max(0, total - start);
+            const requestCount = Math.max(1, Math.min(maxPerPage, remaining));
+            yield* emitLog(
+              `[${device.path}] TX GET_RT_LABELS start=${start} count=${requestCount}`,
+            );
             const page = yield* withRetry(
               () =>
-                deviceService.getRtLabels(device.handle, info, start, maxCount),
+                deviceService.getRtLabels(
+                  device.handle,
+                  info,
+                  start,
+                  requestCount,
+                ),
               commandRetryCount,
             );
             yield* emit({
@@ -356,17 +388,22 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const syncDevice = (device: ConnectedDevice) =>
         Effect.gen(function* () {
           const tryStep = <T>(
+            label: string,
             run: () => Effect.Effect<T, DeviceError>,
           ): Effect.Effect<T | null, never> =>
-            withRetry(run, commandRetryCount).pipe(
-              Effect.catchAll((error) =>
-                setDeviceError(device.path, { type: "device", error }).pipe(
-                  Effect.as(null),
+            emitLog(`[${device.path}] TX ${label}`).pipe(
+              Effect.zipRight(
+                withRetry(run, commandRetryCount).pipe(
+                  Effect.catchAll((error) =>
+                    setDeviceError(device.path, { type: "device", error }).pipe(
+                      Effect.as(null),
+                    ),
+                  ),
                 ),
               ),
             );
 
-          const state = yield* tryStep(() =>
+          const state = yield* tryStep("GET_STATE(sync)", () =>
             deviceService.getState(device.handle),
           );
           if (!state) return;
@@ -383,21 +420,21 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
             return;
           }
 
-          const timing = yield* tryStep(() =>
+          const timing = yield* tryStep("GET_TIMING(sync)", () =>
             deviceService.getTiming(device.handle, info),
           );
           if (timing) {
             yield* emit({ type: "timingUpdated", path: device.path, timing });
           }
 
-          const trigger = yield* tryStep(() =>
+          const trigger = yield* tryStep("GET_TRIGGER(sync)", () =>
             deviceService.getTrigger(device.handle, info),
           );
           if (trigger) {
             yield* emit({ type: "triggerUpdated", path: device.path, trigger });
           }
 
-          const map = yield* tryStep(() =>
+          const map = yield* tryStep("GET_CHANNEL_MAP(sync)", () =>
             deviceService.getChannelMap(device.handle, info),
           );
           if (map) {
@@ -417,7 +454,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
           );
 
           for (let index = 0; index < info.rtCount; index += 1) {
-            const rt = yield* tryStep(() =>
+            const rt = yield* tryStep(`GET_RT_BUFFER idx=${index}(sync)`, () =>
               deviceService.getRtBuffer(device.handle, info, index),
             );
             if (!rt) continue;
@@ -435,140 +472,167 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
           Effect.ignore,
         );
 
+      const logCommand = (message: string, effect: Effect.Effect<void, never>) =>
+        emitLog(message).pipe(Effect.zipRight(effect));
+
       const handleCommand = (
         cmd: RuntimeCommand,
       ): Effect.Effect<void, never> => {
         switch (cmd.type) {
           case "connect":
-            return connectDevice(cmd.path, cmd.config);
+            return logCommand(`[runtime] CONNECT ${cmd.path}`, connectDevice(cmd.path, cmd.config));
           case "disconnect":
-            return disconnectDevice(cmd.path);
+            return logCommand(`[runtime] DISCONNECT ${cmd.path}`, disconnectDevice(cmd.path));
           case "pollState":
-            return runOnDevices(
-              (device) => deviceService.getState(device.handle),
-              statePollRetryCount,
-              false,
-              (path, state) => emit({ type: "stateUpdated", path, state }),
-              undefined,
+            return logCommand(
+              "[runtime] TX GET_STATE (poll)",
+              runOnDevices(
+                (device) => deviceService.getState(device.handle),
+                statePollRetryCount,
+                false,
+                (path, state) => emit({ type: "stateUpdated", path, state }),
+                undefined,
+              ),
             );
           case "pollFrame":
-            return Effect.gen(function* () {
-              const delayMs = Date.now() - cmd.queuedAt;
-              if (delayMs > frameTimeoutMs) {
-                const list = yield* getSessionList();
-                for (const session of list) {
-                  yield* emit({
-                    type: "frameCleared",
-                    path: session.device.path,
-                  });
+            return logCommand(
+              "[runtime] TX GET_FRAME (poll)",
+              Effect.gen(function* () {
+                const delayMs = Date.now() - cmd.queuedAt;
+                if (delayMs > frameTimeoutMs) {
+                  const list = yield* getSessionList();
+                  for (const session of list) {
+                    yield* emit({
+                      type: "frameCleared",
+                      path: session.device.path,
+                    });
+                  }
                 }
-              }
 
-              yield* runOnDevices(
-                (device) => deviceService.getFrame(device.handle, device.info),
-                framePollRetryCount,
-                true,
-                (path, frame) => emit({ type: "frameUpdated", path, frame }),
-                undefined,
-              );
-            });
+                yield* runOnDevices(
+                  (device) => deviceService.getFrame(device.handle, device.info),
+                  framePollRetryCount,
+                  true,
+                  (path, frame) => emit({ type: "frameUpdated", path, frame }),
+                  undefined,
+                );
+              }),
+            );
           case "setState":
-            return runOnDevices(
-              (device) =>
-                deviceService
-                  .setState(device.handle, cmd.state)
-                  .pipe(
-                    Effect.flatMap(() => deviceService.getState(device.handle)),
-                  ),
-              commandRetryCount,
-              false,
-              (path, state) => emit({ type: "stateUpdated", path, state }),
-              cmd.targets,
+            return logCommand(
+              `[runtime] TX SET_STATE value=${cmd.state}`,
+              runOnDevices(
+                (device) =>
+                  deviceService
+                    .setState(device.handle, cmd.state)
+                    .pipe(
+                      Effect.flatMap(() => deviceService.getState(device.handle)),
+                    ),
+                commandRetryCount,
+                false,
+                (path, state) => emit({ type: "stateUpdated", path, state }),
+                cmd.targets,
+              ),
             );
           case "trigger":
-            return runOnDevices(
-              (device) => deviceService.trigger(device.handle),
-              commandRetryCount,
-              false,
-              () => Effect.succeed(undefined),
-              cmd.targets,
+            return logCommand(
+              "[runtime] TX TRIGGER",
+              runOnDevices(
+                (device) => deviceService.trigger(device.handle),
+                commandRetryCount,
+                false,
+                () => Effect.succeed(undefined),
+                cmd.targets,
+              ),
             );
           case "setTiming":
-            return runOnDevices(
-              (device) =>
-                deviceService
-                  .setTiming(
-                    device.handle,
-                    device.info,
-                    cmd.divider,
-                    cmd.preTrig,
-                  )
-                  .pipe(
-                    Effect.flatMap(() =>
-                      deviceService.getTiming(device.handle, device.info),
-                    ),
-                  ),
-              commandRetryCount,
-              false,
-              (path, timing) => emit({ type: "timingUpdated", path, timing }),
-              cmd.targets,
-            );
-          case "setChannelMap":
-            return runOnDevices(
-              (device) =>
-                deviceService
-                  .setChannelMap(device.handle, cmd.channelIdx, cmd.catalogIdx)
-                  .pipe(
-                    Effect.flatMap(() =>
-                      deviceService.getChannelMap(device.handle, device.info),
-                    ),
-                  ),
-              commandRetryCount,
-              false,
-              (path, map) => emit({ type: "channelMapUpdated", path, map }),
-              cmd.targets,
-            );
-          case "setTrigger":
-            return runOnDevices(
-              (device) =>
-                deviceService
-                  .setTrigger(
-                    device.handle,
-                    device.info,
-                    cmd.threshold,
-                    cmd.channel,
-                    cmd.mode,
-                  )
-                  .pipe(
-                    Effect.flatMap(() =>
-                      deviceService.getTrigger(device.handle, device.info),
-                    ),
-                  ),
-              commandRetryCount,
-              false,
-              (path, trigger) =>
-                emit({ type: "triggerUpdated", path, trigger }),
-              cmd.targets,
-            );
-          case "setRtBuffer":
-            return runOnDevices(
-              (device) =>
-                deviceService
-                  .setRtBuffer(device.handle, device.info, cmd.index, cmd.value)
-                  .pipe(
-                    Effect.flatMap(() =>
-                      deviceService.getRtBuffer(
-                        device.handle,
-                        device.info,
-                        cmd.index,
+            return logCommand(
+              `[runtime] TX SET_TIMING divider=${cmd.divider} preTrig=${cmd.preTrig}`,
+              runOnDevices(
+                (device) =>
+                  deviceService
+                    .setTiming(
+                      device.handle,
+                      device.info,
+                      cmd.divider,
+                      cmd.preTrig,
+                    )
+                    .pipe(
+                      Effect.flatMap(() =>
+                        deviceService.getTiming(device.handle, device.info),
                       ),
                     ),
-                  ),
-              commandRetryCount,
-              false,
-              (path, rt) =>
-                emit({ type: "rtBufferUpdated", path, index: cmd.index, rt }),
-              cmd.targets,
+                commandRetryCount,
+                false,
+                (path, timing) => emit({ type: "timingUpdated", path, timing }),
+                cmd.targets,
+              ),
+            );
+          case "setChannelMap":
+            return logCommand(
+              `[runtime] TX SET_CHANNEL_MAP ch=${cmd.channelIdx} var=${cmd.catalogIdx}`,
+              runOnDevices(
+                (device) =>
+                  deviceService
+                    .setChannelMap(device.handle, cmd.channelIdx, cmd.catalogIdx)
+                    .pipe(
+                      Effect.flatMap(() =>
+                        deviceService.getChannelMap(device.handle, device.info),
+                      ),
+                    ),
+                commandRetryCount,
+                false,
+                (path, map) => emit({ type: "channelMapUpdated", path, map }),
+                cmd.targets,
+              ),
+            );
+          case "setTrigger":
+            return logCommand(
+              `[runtime] TX SET_TRIGGER threshold=${cmd.threshold} ch=${cmd.channel} mode=${cmd.mode}`,
+              runOnDevices(
+                (device) =>
+                  deviceService
+                    .setTrigger(
+                      device.handle,
+                      device.info,
+                      cmd.threshold,
+                      cmd.channel,
+                      cmd.mode,
+                    )
+                    .pipe(
+                      Effect.flatMap(() =>
+                        deviceService.getTrigger(device.handle, device.info),
+                      ),
+                    ),
+                commandRetryCount,
+                false,
+                (path, trigger) =>
+                  emit({ type: "triggerUpdated", path, trigger }),
+                cmd.targets,
+              ),
+            );
+          case "setRtBuffer":
+            return logCommand(
+              `[runtime] TX SET_RT_BUFFER idx=${cmd.index} value=${cmd.value}`,
+              runOnDevices(
+                (device) =>
+                  deviceService
+                    .setRtBuffer(device.handle, device.info, cmd.index, cmd.value)
+                    .pipe(
+                      Effect.flatMap(() =>
+                        deviceService.getRtBuffer(
+                          device.handle,
+                          device.info,
+                          cmd.index,
+                        ),
+                      ),
+                    ),
+                commandRetryCount,
+                false,
+                (path, rt) =>
+                  emit({ type: "rtBufferUpdated", path, index: cmd.index, rt }),
+                cmd.targets,
+              ),
             );
         }
       };

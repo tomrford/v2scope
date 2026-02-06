@@ -43,9 +43,7 @@ type RtConsensus = {
   ready: boolean;
   aligned: boolean;
   valuesReady: boolean;
-  names: string[];
-  entries: Array<{ name: string; value: number | null }>;
-  nameToIdxByDevice: Map<string, Map<string, number>>;
+  entries: Array<{ idx: number; name: string; value: number | null }>;
 };
 
 type ConsensusCompleteness = {
@@ -117,26 +115,6 @@ const arrayEqual = (a: readonly number[], b: readonly number[]): boolean => {
   return true;
 };
 
-const buildNameToIdx = (
-  list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"],
-) => {
-  const map = new Map<string, number>();
-  if (!list) return map;
-  for (let i = 0; i < list.entries.length; i += 1) {
-    const name = list.entries[i];
-    if (!name) continue;
-    if (!map.has(name)) {
-      map.set(name, i);
-    }
-  }
-  return map;
-};
-
-const intersectNames = (baseline: string[], maps: Map<string, number>[]): string[] => {
-  if (baseline.length === 0 || maps.length === 0) return [];
-  return baseline.filter((name) => maps.every((m) => m.has(name)));
-};
-
 const listReady = (list: DeviceCatalog["varList"] | DeviceCatalog["rtLabels"]) => {
   if (!list) return false;
   return list.entries.every((entry) => entry !== null);
@@ -171,9 +149,7 @@ const emptyConsensus = (): DeviceConsensus => ({
     ready: false,
     aligned: false,
     valuesReady: false,
-    names: [],
     entries: [],
-    nameToIdxByDevice: new Map(),
   },
   completeness: {
     state: false,
@@ -283,11 +259,6 @@ export const deviceConsensus = derived(
     const variablesReady = devices.every((device) => listReady(device.catalog.varList));
     const rtLabelsReady = devices.every((device) => listReady(device.catalog.rtLabels));
 
-    const rtNameToIdxByDevice = new Map<string, Map<string, number>>();
-    for (const device of devices) {
-      rtNameToIdxByDevice.set(device.path, buildNameToIdx(device.catalog.rtLabels));
-    }
-
     const baselineVarEntries = devices[0].catalog.varList;
     const baselineRtEntries = devices[0].catalog.rtLabels;
 
@@ -306,33 +277,33 @@ export const deviceConsensus = derived(
             .filter(Boolean) as CatalogEntry[]
         : [];
 
-    const baselineRtNames = rtLabelsReady
-      ? (devices[0].catalog.rtLabels?.entries.filter(Boolean) as string[])
-      : [];
-    const rtNames = rtLabelsReady
-      ? intersectNames(baselineRtNames, Array.from(rtNameToIdxByDevice.values()))
-      : [];
-
     let rtValuesReady = rtLabelsReady;
-    const rtEntries = rtNames.map((name) => {
-      const values: number[] = [];
-      for (const device of devices) {
-        const idx = rtNameToIdxByDevice.get(device.path)?.get(name);
-        const value = idx !== undefined ? device.rtBuffers.get(idx)?.value : undefined;
-        if (typeof value === "number") {
-          values.push(value);
-        } else {
-          rtValuesReady = false;
-        }
-      }
+    const rtEntries =
+      rtCatalogAligned && baselineRtEntries
+        ? baselineRtEntries.entries.map((rawName, idx) => {
+            const values: number[] = [];
+            for (const device of devices) {
+              const value = device.rtBuffers.get(idx)?.value;
+              if (typeof value === "number") {
+                values.push(value);
+              } else {
+                rtValuesReady = false;
+              }
+            }
 
-      const valueConsensus =
-        values.length === devices.length && values.every((v) => v === values[0])
-          ? values[0]
-          : null;
+            const valueConsensus =
+              values.length === devices.length &&
+              values.every((v) => v === values[0])
+                ? values[0]
+                : null;
 
-      return { name, value: valueConsensus };
-    });
+            return {
+              idx,
+              name: rawName && rawName.length > 0 ? rawName : `RT ${idx + 1}`,
+              value: valueConsensus,
+            };
+          })
+        : [];
 
     const staticMismatch = !staticInfoAligned;
     const stateMismatch = stateComplete && !stateAligned;
@@ -386,9 +357,7 @@ export const deviceConsensus = derived(
         ready: rtLabelsReady,
         aligned: rtCatalogAligned,
         valuesReady: rtValuesReady,
-        names: rtNames,
         entries: rtEntries,
-        nameToIdxByDevice: rtNameToIdxByDevice,
       },
       completeness: {
         state: stateComplete,

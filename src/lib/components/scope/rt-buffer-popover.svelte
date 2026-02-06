@@ -8,9 +8,9 @@
   import { enqueueGuardedCommand } from "$lib/runtime/command-policy";
 
   type RtEntry = {
+    idx: number;
     name: string;
     value: number | null;
-    index: number | null;
   };
 
   const consensus = $derived($deviceConsensus);
@@ -19,11 +19,7 @@
 
   const entries = $derived.by((): RtEntry[] => {
     if (consensus.rt.entries.length > 0) {
-      return consensus.rt.entries.map((entry) => ({
-        name: entry.name,
-        value: entry.value,
-        index: null,
-      }));
+      return consensus.rt.entries;
     }
 
     if (sessions.length !== 1) return [];
@@ -33,27 +29,15 @@
     const names = device.catalog.rtLabels?.entries ?? [];
 
     return Array.from({ length: count }, (_, index) => ({
+      idx: index,
       name: names[index] ?? `RT ${index + 1}`,
       value: device.rtBuffers.get(index)?.value ?? null,
-      index,
     }));
   });
   const disabled = $derived(!permissions.setRtBuffer || entries.length === 0);
 
-  const resolveIndex = (entry: RtEntry): number | null => {
-    if (entry.index !== null) return entry.index;
-    // Use any device's name→idx map (catalogs enforced aligned)
-    for (const map of consensus.rt.nameToIdxByDevice.values()) {
-      const idx = map.get(entry.name);
-      if (idx !== undefined) return idx;
-    }
-    return null;
-  };
-
   const handleValueCommit = (entry: RtEntry, value: number) => {
-    const index = resolveIndex(entry);
-    if (index === null) return;
-    enqueueGuardedCommand({ type: "setRtBuffer", index, value });
+    enqueueGuardedCommand({ type: "setRtBuffer", index: entry.idx, value });
   };
 
   const handleKeydown = (e: KeyboardEvent, entry: RtEntry) => {
@@ -82,7 +66,7 @@
         <p class="text-xs text-muted-foreground">No RT buffer entries</p>
       {:else}
         <div class="grid grid-cols-2 gap-x-4 gap-y-2">
-          {#each entries as entry (entry.index ?? entry.name)}
+          {#each entries as entry (entry.idx)}
             <div class="flex items-center gap-2">
               <span class="w-20 shrink-0 truncate text-xs text-muted-foreground" title={entry.name}>
                 {entry.name}
