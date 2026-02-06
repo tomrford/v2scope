@@ -298,7 +298,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const frameTimeoutMs = Math.max(1, Math.floor(config.frameTimeoutMs));
 
       const maxNameEntries = (nameLen: number): number =>
-        Math.max(1, Math.floor((252 - 3) / nameLen));
+        Math.max(1, Math.floor((252 - 3) / Math.max(1, Math.floor(nameLen))));
 
       const fetchVarList = (device: ConnectedDevice) =>
         Effect.gen(function* () {
@@ -355,45 +355,72 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
 
       const syncDevice = (device: ConnectedDevice) =>
         Effect.gen(function* () {
-          const info = device.info;
-          const state = yield* withRetry(
-            () => deviceService.getState(device.handle),
-            commandRetryCount,
+          const tryStep = <T>(
+            run: () => Effect.Effect<T, DeviceError>,
+          ): Effect.Effect<T | null, never> =>
+            withRetry(run, commandRetryCount).pipe(
+              Effect.catchAll((error) =>
+                setDeviceError(device.path, { type: "device", error }).pipe(
+                  Effect.as(null),
+                ),
+              ),
+            );
+
+          const state = yield* tryStep(() =>
+            deviceService.getState(device.handle),
           );
+          if (!state) return;
+
           yield* emit({ type: "stateUpdated", path: device.path, state });
+          const info = device.info;
 
           if (state.state === State.MISCONFIGURED) {
-            yield* fetchVarList(device);
+            yield* fetchVarList(device).pipe(
+              Effect.catchAll((error) =>
+                setDeviceError(device.path, { type: "device", error }),
+              ),
+            );
             return;
           }
 
-          const timing = yield* withRetry(
-            () => deviceService.getTiming(device.handle, info),
-            commandRetryCount,
+          const timing = yield* tryStep(() =>
+            deviceService.getTiming(device.handle, info),
           );
-          yield* emit({ type: "timingUpdated", path: device.path, timing });
+          if (timing) {
+            yield* emit({ type: "timingUpdated", path: device.path, timing });
+          }
 
-          const trigger = yield* withRetry(
-            () => deviceService.getTrigger(device.handle, info),
-            commandRetryCount,
+          const trigger = yield* tryStep(() =>
+            deviceService.getTrigger(device.handle, info),
           );
-          yield* emit({ type: "triggerUpdated", path: device.path, trigger });
+          if (trigger) {
+            yield* emit({ type: "triggerUpdated", path: device.path, trigger });
+          }
 
-          const map = yield* withRetry(
-            () => deviceService.getChannelMap(device.handle, info),
-            commandRetryCount,
+          const map = yield* tryStep(() =>
+            deviceService.getChannelMap(device.handle, info),
           );
-          yield* emit({ type: "channelMapUpdated", path: device.path, map });
+          if (map) {
+            yield* emit({ type: "channelMapUpdated", path: device.path, map });
+          }
 
-          yield* fetchVarList(device);
-          yield* fetchRtLabels(device);
+          yield* fetchVarList(device).pipe(
+            Effect.catchAll((error) =>
+              setDeviceError(device.path, { type: "device", error }),
+            ),
+          );
+
+          yield* fetchRtLabels(device).pipe(
+            Effect.catchAll((error) =>
+              setDeviceError(device.path, { type: "device", error }),
+            ),
+          );
 
           for (let index = 0; index < info.rtCount; index += 1) {
-            const rt = yield* withRetry(
-              () =>
-                deviceService.getRtBuffer(device.handle, info, index),
-              commandRetryCount,
+            const rt = yield* tryStep(() =>
+              deviceService.getRtBuffer(device.handle, info, index),
             );
+            if (!rt) continue;
             yield* emit({
               type: "rtBufferUpdated",
               path: device.path,
@@ -435,7 +462,6 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                     path: session.device.path,
                   });
                 }
-                return;
               }
 
               yield* runOnDevices(

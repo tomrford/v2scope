@@ -19,36 +19,13 @@
   import { activatePorts, resyncPorts, addToSaved } from "$lib/runtime/devices";
   import { onMount } from "svelte";
 
-  const PORT_POLL_INTERVAL_MS = 2000;
-
   onMount(() => {
-    let disposed = false;
-    let intervalId: number | null = null;
-
     const poll = async () => {
-      if (disposed) return;
       if (document.visibilityState !== "visible") return;
       await refreshAvailablePorts();
     };
 
-    const onVisibilityChange = () => {
-      if (document.visibilityState !== "visible") return;
-      void poll();
-    };
-
     void poll();
-    intervalId = window.setInterval(() => {
-      void poll();
-    }, PORT_POLL_INTERVAL_MS);
-    document.addEventListener("visibilitychange", onVisibilityChange);
-
-    return () => {
-      disposed = true;
-      if (intervalId !== null) {
-        window.clearInterval(intervalId);
-      }
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
   });
 
   async function handleRefreshAvailable() {
