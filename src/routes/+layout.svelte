@@ -38,6 +38,7 @@
   let warnings = $state<string[]>([]);
   let currentConfig: RuntimePollingConfig | null = null;
   let retryBootstrap: (() => void) | null = null;
+  let restartChain: Promise<void> = Promise.resolve();
 
   const isSameConfig = (
     left: RuntimePollingConfig,
@@ -62,15 +63,20 @@
     fatal = { phase, message: toErrorMessage(error) };
   };
 
-  const restartRuntime = async (config: RuntimePollingConfig) => {
-    const active = getActivePorts();
-    await startRuntimeStores(makeRuntime(config));
-    if (active.length === 0) return;
-    try {
-      await activatePorts(active);
-    } catch (error) {
-      console.info("reconnect failed", error);
-    }
+  const restartRuntime = (config: RuntimePollingConfig): Promise<void> => {
+    restartChain = restartChain
+      .catch(() => undefined)
+      .then(async () => {
+        const active = getActivePorts();
+        await startRuntimeStores(makeRuntime(config));
+        if (active.length === 0) return;
+        try {
+          await activatePorts(active);
+        } catch (error) {
+          console.info("reconnect failed", error);
+        }
+      });
+    return restartChain;
   };
 
   onMount(() => {

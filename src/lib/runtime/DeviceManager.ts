@@ -23,6 +23,7 @@ export interface DeviceManagerShape {
     config: SerialConfig,
   ) => Effect.Effect<ConnectedDevice, DeviceError>;
   readonly disconnect: (path: string) => Effect.Effect<void, never>;
+  readonly disconnectAll: () => Effect.Effect<void, never>;
   readonly getActiveDevices: () => Effect.Effect<
     readonly ConnectedDevice[],
     never
@@ -53,19 +54,23 @@ export const DeviceManagerLive = Layer.effect(
     return {
       connect: (path, config) =>
         Effect.gen(function* () {
-          // Check if already connected
           const current = yield* Ref.get(devices);
           const existing = HashMap.get(current, path);
           if (Option.isSome(existing)) {
             return existing.value;
           }
 
-          // Open device and get info
           const handle = yield* deviceService.openDevice(path, config);
-          const info = yield* deviceService.getInfo(handle);
+          const info = yield* deviceService.getInfo(handle).pipe(
+            Effect.catchAll((error) =>
+              deviceService.closeDevice(handle).pipe(
+                Effect.ignore,
+                Effect.zipRight(Effect.fail(error)),
+              ),
+            ),
+          );
           const device: ConnectedDevice = { path, handle, info };
 
-          // Store in map
           yield* Ref.update(devices, HashMap.set(path, device));
           return device;
         }),
@@ -76,13 +81,23 @@ export const DeviceManagerLive = Layer.effect(
           const existing = HashMap.get(current, path);
 
           if (Option.isSome(existing)) {
-            // Close device (ignore errors - best effort)
             yield* deviceService
               .closeDevice(existing.value.handle)
               .pipe(Effect.ignore);
-            // Remove from map
             yield* Ref.update(devices, HashMap.remove(path));
           }
+        }),
+
+      disconnectAll: () =>
+        Effect.gen(function* () {
+          const current = yield* Ref.get(devices);
+          const all = Array.from(HashMap.values(current));
+          for (const device of all) {
+            yield* deviceService
+              .closeDevice(device.handle)
+              .pipe(Effect.ignore);
+          }
+          yield* Ref.set(devices, HashMap.empty());
         }),
 
       getActiveDevices: () =>

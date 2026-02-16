@@ -143,6 +143,7 @@ export type RuntimeEvent =
 interface DeviceSession {
   readonly device: ConnectedDevice;
   readonly error: RuntimeDeviceError | null;
+  readonly lastFrameAt: number | null;
 }
 
 export interface RuntimeServiceShape {
@@ -167,17 +168,18 @@ const errorTag = (error: DeviceError): string | null => {
 const isRetryableError = (error: DeviceError): boolean =>
   errorTag(error) === "CrcMismatch";
 
+const MAX_DEVICE_CONCURRENCY = 8;
+
 const withRetry = <T>(
   run: () => Effect.Effect<T, DeviceError>,
-  retriesLeft: number,
+  maxRetries: number,
 ): Effect.Effect<T, DeviceError> =>
-  run().pipe(
-    Effect.catchAll((error) =>
-      retriesLeft > 0 && isRetryableError(error)
-        ? withRetry(run, retriesLeft - 1)
-        : Effect.fail(error),
-    ),
-  );
+  maxRetries <= 0
+    ? run()
+    : Effect.retry(run(), {
+        schedule: Schedule.recurs(maxRetries),
+        while: isRetryableError,
+      });
 
 export const RuntimeServiceLive = (config: PollingConfig) =>
   Layer.scoped(
@@ -254,7 +256,7 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
                   Effect.succeed({ path: session.device.path, error }),
                 ),
               ),
-            { concurrency: "unbounded" },
+            { concurrency: MAX_DEVICE_CONCURRENCY },
           );
 
           const successes = results.filter(
@@ -283,7 +285,11 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
       const connectDevice = (path: string, config: SerialConfig) =>
         deviceManager.connect(path, config).pipe(
           Effect.tap((device) => {
-            const session: DeviceSession = { device, error: null };
+            const session: DeviceSession = {
+              device,
+              error: null,
+              lastFrameAt: null,
+            };
             return Ref.update(sessions, HashMap.set(path, session));
           }),
           Effect.tap((device) => emit({ type: "deviceConnected", device })),
@@ -498,24 +504,40 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
             return logCommand(
               "[runtime] TX GET_FRAME (poll)",
               Effect.gen(function* () {
-                const delayMs = Date.now() - cmd.queuedAt;
-                if (delayMs > frameTimeoutMs) {
-                  const list = yield* getSessionList();
-                  for (const session of list) {
+                const now = Date.now();
+
+                yield* runOnDevices(
+                  (device) => deviceService.getFrame(device.handle, device.info),
+                  framePollRetryCount,
+                  true,
+                  (path, frame) =>
+                    updateSession(path, (s) => ({
+                      ...s,
+                      lastFrameAt: now,
+                    })).pipe(
+                      Effect.zipRight(
+                        emit({ type: "frameUpdated", path, frame }),
+                      ),
+                    ),
+                  undefined,
+                );
+
+                const list = yield* getSessionList();
+                for (const session of list) {
+                  if (
+                    session.lastFrameAt !== null &&
+                    now - session.lastFrameAt > frameTimeoutMs
+                  ) {
+                    yield* updateSession(session.device.path, (s) => ({
+                      ...s,
+                      lastFrameAt: null,
+                    }));
                     yield* emit({
                       type: "frameCleared",
                       path: session.device.path,
                     });
                   }
                 }
-
-                yield* runOnDevices(
-                  (device) => deviceService.getFrame(device.handle, device.info),
-                  framePollRetryCount,
-                  true,
-                  (path, frame) => emit({ type: "frameUpdated", path, frame }),
-                  undefined,
-                );
               }),
             );
           case "setState":
@@ -718,7 +740,18 @@ export const RuntimeServiceLive = (config: PollingConfig) =>
           case "pollFrame":
             return Queue.offer(framePollCommands, cmd).pipe(Effect.ignore);
           default:
-            return Queue.offer(userCommands, cmd).pipe(Effect.ignore);
+            return Queue.offer(userCommands, cmd).pipe(
+              Effect.timeoutFail({
+                duration: Duration.seconds(2),
+                onTimeout: () => "queue_full" as const,
+              }),
+              Effect.catchAll(() =>
+                emitLog(
+                  `[runtime] command queue full, dropped ${cmd.type}`,
+                ),
+              ),
+              Effect.ignore,
+            );
         }
       };
 

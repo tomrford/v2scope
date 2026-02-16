@@ -1,10 +1,10 @@
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { writable } from "svelte/store";
 import type {
   RuntimeCommand,
   RuntimeEvent,
 } from "../runtime/RuntimeService";
-import type { DeviceManager } from "../runtime/DeviceManager";
+import { DeviceManager } from "../runtime/DeviceManager";
 import type { DeviceService } from "../runtime/DeviceService";
 import { RuntimeService } from "../runtime/RuntimeService";
 import {
@@ -56,9 +56,19 @@ let eventLoopPromise: Promise<never> | null = null;
 
 const eventLoop = Effect.flatMap(RuntimeService, (service) =>
   Effect.forever(
-    service
-      .takeEvent()
-      .pipe(Effect.flatMap((event) => Effect.sync(() => applyEvent(event)))),
+    service.takeEvent().pipe(
+      Effect.flatMap((event) => Effect.sync(() => applyEvent(event))),
+      Effect.catchAllCause((cause) =>
+        Effect.sync(() => {
+          const pretty = Cause.pretty(cause);
+          console.error("event handler error (continuing)", pretty);
+          appendRuntimeLog({
+            at: Date.now(),
+            message: `[runtime] event handler error: ${pretty}`,
+          });
+        }),
+      ),
+    ),
   ),
 );
 
@@ -81,6 +91,13 @@ export async function startRuntimeStores(
 
 export async function stopRuntimeStores(): Promise<void> {
   if (!runtime) return;
+  try {
+    await runtime.runPromise(
+      Effect.flatMap(DeviceManager, (mgr) => mgr.disconnectAll()),
+    );
+  } catch {
+    // Best effort; runtime may already be partially torn down
+  }
   await Effect.runPromise(runtime.disposeEffect);
   runtime = null;
   eventLoopPromise = null;
