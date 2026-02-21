@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
+  import { untrack } from "svelte";
   import {
     createLivePlotEngine,
     type LiveChartConfig,
@@ -76,10 +76,6 @@
     engine?.setScrubTime(scrubTime);
   });
 
-  onDestroy(() => {
-    engine?.destroy();
-    engine = null;
-  });
 </script>
 
 <div bind:this={container} class={cn("relative h-full w-full", className)}>
