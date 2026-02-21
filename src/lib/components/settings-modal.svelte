@@ -4,7 +4,11 @@
   import { Button } from "$lib/components/ui/button";
   import { Input } from "$lib/components/ui/input";
   import { Toggle } from "$lib/components/ui/toggle";
-  import { settings, updateSetting } from "$lib/store/settings";
+  import {
+    settings,
+    updateSetting,
+    liveFrameFloorHz,
+  } from "$lib/store/settings";
   import type { SerialConfig } from "$lib/transport/serial.schema";
   import ClockIcon from "@lucide/svelte/icons/clock";
   import CableIcon from "@lucide/svelte/icons/cable";
@@ -134,7 +138,7 @@
               >
               <Input
                 type="number"
-                min={1}
+                min={$liveFrameFloorHz}
                 max={50}
                 value={$settings.framePollingHz}
                 oninput={(e) =>
@@ -143,6 +147,9 @@
                     parseInt(e.currentTarget.value) || 10,
                   )}
               />
+            </div>
+            <div class="text-xs text-muted-foreground">
+              Live view floor: {$liveFrameFloorHz} Hz (>= 60 samples/window)
             </div>
             <div class="grid grid-cols-[1fr_100px] items-center gap-4">
               <span class="text-sm text-muted-foreground"

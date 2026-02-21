@@ -22,8 +22,6 @@ const testInfo: DeviceInfo = {
 
 const testHandle = DeviceHandle(1);
 
-const noop = () => Effect.void as Effect.Effect<void, never>;
-
 const makeTrackedDeviceService = (opts?: {
   getInfoFail?: DeviceError;
   openFail?: DeviceError;
@@ -34,6 +32,7 @@ const makeTrackedDeviceService = (opts?: {
   const service: DeviceServiceShape = {
     listPorts: () => Effect.succeed([] as PortInfo[]),
     openDevice: (_path, _config) => {
+      void _config;
       openCalls.push(_path);
       if (opts?.openFail)
         return Effect.fail(opts.openFail) as Effect.Effect<

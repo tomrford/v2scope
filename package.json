@@ -26,7 +26,6 @@
     "effect": "3.19.14",
     "restructure": "3.0.2",
     "runed": "0.37.1",
-    "uplot": "1.6.32",
     "zod": "4.3.5"
   },
   "devDependencies": {

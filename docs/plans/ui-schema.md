@@ -9,7 +9,7 @@
 
 ## Main View (Scope)
 
-- Live plots implemented with ring buffer sized by `framePollingHz` + `liveBufferDurationS`.
+- Live plots implemented with FIFO history + multiseries live renderer sized by `framePollingHz` + `liveBufferDurationS`.
 - Control buttons present (Channels/Timing/Trigger/Display) but no popovers yet.
 
 ## General Settings

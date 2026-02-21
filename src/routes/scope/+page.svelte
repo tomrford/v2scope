@@ -1,12 +1,22 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { Plot } from "$lib/components/plot";
+  import { onMount, untrack } from "svelte";
+  import { LivePlot } from "$lib/components/liveplot";
+  import { Button } from "$lib/components/ui/button";
   import { Item } from "$lib/components/ui/item";
   import ChannelsPopover from "$lib/components/scope/channels-popover.svelte";
   import TimingPopover from "$lib/components/scope/timing-popover.svelte";
   import TriggerPopover from "$lib/components/scope/trigger-popover.svelte";
   import RtBufferPopover from "$lib/components/scope/rt-buffer-popover.svelte";
   import RunStopButton from "$lib/components/scope/run-stop-button.svelte";
+  import {
+    clearHistoryChannels,
+    createLiveHistoryState,
+    ingestFrameTick,
+    pruneHistoryWindow,
+    reconcileHistoryDevices,
+    toChannelSeries,
+  } from "$lib/liveplot/history";
+  import type { LiveHoverPayload, LiveSeries } from "$lib/liveplot/core";
   import { frameTick } from "$lib/store/runtime";
   import { connectedDevices } from "$lib/store/device-store";
   import {
@@ -14,24 +24,8 @@
     consensusChannelMap,
   } from "$lib/store/device-consensus";
   import { settings } from "$lib/settings";
-  import type uPlot from "uplot";
 
-  type FrameRing = {
-    path: string;
-    label: string;
-    color: string;
-    size: number;
-    channels: number;
-    frameHz: number;
-    cursor: number;
-    data: Array<Array<number | null>>;
-  };
-
-  type ChannelPlot = {
-    x: Array<number>;
-    series: uPlot.Series[];
-  };
-
+  const MAX_CHANNEL_PLOTS = 5;
   const colors = [
     "#ef4444",
     "#3b82f6",
@@ -44,65 +38,38 @@
   ];
 
   const sessions = $derived($connectedDevices);
-
-  const ringConfig = $derived({
-    frameHz: $settings.framePollingHz,
-    durationS: $settings.liveBufferDurationS,
-    channels: $consensusStaticInfo.value?.numChannels ?? 0,
-    size: Math.max(
-      1,
-      Math.round($settings.framePollingHz * $settings.liveBufferDurationS),
-    ),
-  });
-
-  const createRing = (
-    path: string,
-    label: string,
-    color: string,
-    size: number,
-    channels: number,
-    frameHz: number,
-    cursor: number = size - 1,
-  ): FrameRing => ({
-    path,
-    label,
-    color,
-    size,
-    channels,
-    frameHz,
-    cursor,
-    data: Array.from({ length: channels }, () =>
-      Array.from({ length: size }, () => null),
-    ),
-  });
-
-  const mapCursorForResize = (prev: FrameRing, nextSize: number): number => {
-    const prevNext = (prev.cursor + 1) % prev.size;
-    const ratio = prevNext / prev.size;
-    const mappedNext = Math.max(
+  const channelCount = $derived(
+    Math.max(
       0,
-      Math.min(nextSize - 1, Math.floor(ratio * nextSize)),
-    );
-    return (mappedNext - 1 + nextSize) % nextSize;
-  };
+      Math.min(
+        MAX_CHANNEL_PLOTS,
+        $consensusStaticInfo.value?.numChannels ?? 0,
+      ),
+    ),
+  );
 
-  // Use regular variables for mutable data (not reactive)
-  let rings: FrameRing[] = [];
-  let displayPlots: ChannelPlot[] = [];
+  const hasLayout = $derived.by(() => {
+    const mapLen = $consensusChannelMap.value?.varIds?.length ?? 0;
+    return channelCount > 0 && sessions.length > 0 && mapLen >= channelCount;
+  });
+
+  let plotTheme = $state<"light" | "dark">("dark");
+  let plotsPaused = $state(false);
+  let scrubTime = $state<number | null>(null);
+  let loading = $state(false);
+  let hasAnyData = $state(false);
+  let plotSeriesByChannel = $state.raw<LiveSeries[][]>([]);
+  let hoverByChannel = $state.raw<Array<LiveHoverPayload | null>>([]);
+
+  let history = createLiveHistoryState(0);
   let colorMap: Record<string, string> = {};
-  let layoutKey = "";
   let lastChannelMap: number[] | null = null;
-
-  // Reactive flag for template rendering
-  let hasPlots = $state(false);
-  // Reactive series for template
-  let plotSeries = $state.raw<uPlot.Series[][]>([]);
-  // Reactive plot data arrays - reassigned on each tick to trigger updates
-  let plotDataArrays = $state.raw<uPlot.AlignedData[]>([]);
+  let layoutKey = "";
 
   const assignColors = (paths: string[]) => {
     const used = [...Object.values(colorMap)];
     let paletteIndex = 0;
+
     const pickColor = () => {
       while (paletteIndex < colors.length && used.includes(colors[paletteIndex])) {
         paletteIndex += 1;
@@ -115,103 +82,111 @@
       }
       return colors[paths.length % colors.length];
     };
+
     for (const path of paths) {
-      if (!colorMap[path]) {
-        colorMap[path] = pickColor();
-      }
+      if (!colorMap[path]) colorMap[path] = pickColor();
     }
   };
 
-  const clearChannels = (indices: number[]) => {
-    if (indices.length === 0) return;
-
-    for (const ring of rings) {
-      for (const index of indices) {
-        ring.data[index]?.fill(null);
-      }
-    }
-    plotDataArrays = displayPlots.map(
-      (plot, channelIdx) =>
-        [plot.x, ...rings.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
+  const refreshPlotSeries = (channels: number) => {
+    plotSeriesByChannel = Array.from({ length: channels }, (_, channelIdx) =>
+      toChannelSeries(history, channelIdx),
     );
+
+    hoverByChannel = Array.from(
+      { length: channels },
+      (_, channelIdx) => hoverByChannel[channelIdx] ?? null,
+    );
+
+    hasAnyData = plotSeriesByChannel.some((series) =>
+      series.some((line) => line.points.length >= 2),
+    );
+
+    loading = hasLayout && !hasAnyData;
   };
 
-  // Create/update rings when sessions or config change
-  $effect(() => {
-    const { size, channels, frameHz } = ringConfig;
-    const currentSessions = sessions;
-    const paths = currentSessions.map((s) => s.path);
-    const channelMapLen = $consensusChannelMap.value?.varIds?.length ?? 0;
-
-    if (channels <= 0 || paths.length === 0 || channelMapLen < channels) {
-      layoutKey = "";
-      rings = [];
-      displayPlots = [];
-      hasPlots = false;
-      plotSeries = [];
-      plotDataArrays = [];
+  const handleHover = (channelIdx: number, payload: LiveHoverPayload | null) => {
+    if (payload) {
+      hoverByChannel = hoverByChannel.map((_, idx) =>
+        idx === channelIdx ? payload : null,
+      );
+      scrubTime = payload.time;
       return;
     }
 
-    const labels = currentSessions.map((session) => session.info?.deviceName ?? session.path);
-    const nextLayoutKey = `${size}:${channels}:${frameHz}:${paths.join(",")}:${labels.join(",")}`;
-    if (nextLayoutKey === layoutKey) return;
-    layoutKey = nextLayoutKey;
-
-    assignColors(paths);
-
-    const existing = new Map(rings.map((ring) => [ring.path, ring]));
-    const next: FrameRing[] = [];
-    for (const session of currentSessions) {
-      const path = session.path;
-      const label = session.info?.deviceName ?? path;
-      const color = colorMap[path] ?? colors[0];
-      const prev = existing.get(path);
-      if (
-        prev &&
-        prev.size === size &&
-        prev.channels === channels &&
-        prev.frameHz === frameHz
-      ) {
-        prev.label = label;
-        prev.color = color;
-        next.push(prev);
-      } else {
-        const mappedCursor = prev
-          ? mapCursorForResize(prev, size)
-          : size - 1;
-        next.push(
-          createRing(path, label, color, size, channels, frameHz, mappedCursor),
-        );
-      }
-    }
-    rings = next;
-
-    // Build plot metadata. Data arrays come directly from ring storage.
-    const x = Array.from({ length: size }, (_, i) => i / frameHz);
-    displayPlots = Array.from({ length: channels }, () => ({
-      x,
-      series: next.map((ring) => ({ label: ring.label, stroke: ring.color })),
-    }));
-
-    hasPlots = displayPlots.length > 0;
-    plotSeries = displayPlots.map((p) => p.series);
-    plotDataArrays = displayPlots.map(
-      (plot, channelIdx) =>
-        [plot.x, ...next.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
+    hoverByChannel = hoverByChannel.map((entry, idx) =>
+      idx === channelIdx ? null : entry,
     );
+
+    if (!hoverByChannel.some(Boolean)) {
+      scrubTime = null;
+    }
+  };
+
+  onMount(() => {
+    const root = document.documentElement;
+    const syncTheme = () => {
+      plotTheme = root.classList.contains("dark") ? "dark" : "light";
+    };
+    syncTheme();
+
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
   });
 
-  // Clear channel buffers when channel map changes
   $effect(() => {
-    const channelMap = $consensusChannelMap.value?.varIds ?? null;
-    if (!channelMap) {
+    const sessions_ = sessions;
+    const channels = channelCount;
+
+    if (!hasLayout) {
+      layoutKey = "";
+      history = createLiveHistoryState(channels);
       lastChannelMap = null;
+      scrubTime = null;
+      plotSeriesByChannel = [];
+      hoverByChannel = [];
+      hasAnyData = false;
+      loading = false;
       return;
     }
 
-    if (rings.length === 0 || displayPlots.length === 0) {
-      lastChannelMap = [...channelMap];
+    const paths = sessions_.map((session) => session.path);
+    const labels = sessions_.map((session) => session.info?.deviceName ?? session.path);
+    const nextLayoutKey = `${channels}:${paths.join(",")}:${labels.join(",")}`;
+
+    if (nextLayoutKey !== layoutKey) {
+      layoutKey = nextLayoutKey;
+      assignColors(paths);
+    }
+
+    reconcileHistoryDevices(
+      history,
+      sessions_.map((session) => ({
+        path: session.path,
+        label: session.info?.deviceName ?? session.path,
+        frameValues: session.frame?.values ?? null,
+      })),
+      channels,
+      (path) => colorMap[path] ?? colors[0],
+    );
+
+    pruneHistoryWindow(history, Date.now() / 1000, $settings.liveBufferDurationS);
+    refreshPlotSeries(channels);
+  });
+
+  $effect(() => {
+    const duration = $settings.liveBufferDurationS;
+    if (!hasLayout) return;
+
+    pruneHistoryWindow(history, Date.now() / 1000, duration);
+    refreshPlotSeries(channelCount);
+  });
+
+  $effect(() => {
+    const channelMap = $consensusChannelMap.value?.varIds ?? null;
+    if (!channelMap || !hasLayout) {
+      lastChannelMap = channelMap ? [...channelMap] : null;
       return;
     }
 
@@ -221,77 +196,69 @@
     }
 
     if (channelMap.length !== lastChannelMap.length) {
-      clearChannels(
-        Array.from(
-          { length: Math.min(channelMap.length, displayPlots.length) },
-          (_, index) => index,
-        ),
-      );
+      const changed = Array.from({ length: channelCount }, (_, idx) => idx);
+      clearHistoryChannels(history, changed);
       lastChannelMap = [...channelMap];
+      refreshPlotSeries(channelCount);
       return;
     }
 
     const changed: number[] = [];
-    for (let index = 0; index < channelMap.length; index += 1) {
-      if (channelMap[index] !== lastChannelMap[index]) {
-        changed.push(index);
-      }
+    for (let idx = 0; idx < Math.min(channelMap.length, channelCount); idx += 1) {
+      if (channelMap[idx] !== lastChannelMap[idx]) changed.push(idx);
     }
 
-    if (changed.length === 0) return;
-    clearChannels(changed);
-    lastChannelMap = [...channelMap];
+    if (changed.length > 0) {
+      clearHistoryChannels(history, changed);
+      lastChannelMap = [...channelMap];
+      refreshPlotSeries(channelCount);
+    }
   });
 
-  // On each frame tick: sweep write one point and keep a single null flyback gap.
   $effect(() => {
-    const frameTick_ = $frameTick;
-    if (frameTick_ === 0) return;
+    const tick = $frameTick;
+    if (tick === 0 || !hasLayout) return;
 
-    const currentRings = rings;
-    const currentSessions = untrack(() => sessions);
+    const nowSec = Date.now() / 1000;
+    const sessions_ = untrack(() => sessions);
 
-    if (currentRings.length === 0) return;
-    const frameByPath = new Map(
-      currentSessions.map((session) => [session.path, session.frame]),
+    ingestFrameTick(
+      history,
+      sessions_.map((session) => ({
+        path: session.path,
+        label: session.info?.deviceName ?? session.path,
+        frameValues: session.frame?.values ?? null,
+      })),
+      nowSec,
+      $settings.liveBufferDurationS,
     );
 
-    // Write one point at next cursor and keep one null slot ahead (sweep gap).
-    for (const ring of currentRings) {
-      const writeIdx = (ring.cursor + 1) % ring.size;
-      const gapIdx = (writeIdx + 1) % ring.size;
-      const frame = frameByPath.get(ring.path);
-      for (let c = 0; c < ring.channels; c += 1) {
-        ring.data[c][writeIdx] = frame?.values[c] ?? null;
-        if (ring.size > 1) {
-          ring.data[c][gapIdx] = null;
-        }
-      }
-      ring.cursor = writeIdx;
-    }
-
-    plotDataArrays = displayPlots.map(
-      (plot, channelIdx) =>
-        [plot.x, ...currentRings.map((ring) => ring.data[channelIdx])] as uPlot.AlignedData,
-    );
+    refreshPlotSeries(channelCount);
   });
 </script>
 
 <div class="flex h-full flex-col gap-4 overflow-hidden">
-  <!-- Control bar -->
   <div class="flex shrink-0 items-start gap-2">
     <ChannelsPopover />
     <TimingPopover />
     <TriggerPopover />
     <RtBufferPopover />
+    <Button
+      variant="outline"
+      disabled={!hasLayout}
+      onclick={() => {
+        plotsPaused = !plotsPaused;
+      }}
+    >
+      {plotsPaused ? "Resume Plot" : "Pause Plot"}
+    </Button>
     <div class="ml-auto">
       <RunStopButton />
     </div>
   </div>
 
-  <!-- 5 channel plots, stacked with shared x-axis -->
   <div class="flex min-h-0 flex-1 flex-col gap-1 overflow-hidden">
-    {#if !hasPlots}
+    {#if !hasLayout}
       <Item
         variant="outline"
         class="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground"
@@ -299,16 +266,21 @@
         Waiting for device frames...
       </Item>
     {:else}
-      {#each plotSeries as series, i (i)}
+      {#each Array.from({ length: channelCount }, (_, idx) => idx) as channelIdx (channelIdx)}
         <Item variant="outline" class="min-h-0 flex-1 p-0">
-          <Plot
-            data={plotDataArrays[i]}
-            {series}
-            syncKey="scope"
-            showXAxis={false}
-            showLegend={false}
-            showCursor={false}
+          <LivePlot
             class="h-full w-full"
+            series={plotSeriesByChannel[channelIdx] ?? []}
+            windowSecs={$settings.liveBufferDurationS}
+            paused={plotsPaused}
+            loading={loading}
+            scrubEnabled={true}
+            showGrid={true}
+            showFill={true}
+            scrubTime={scrubTime}
+            theme={plotTheme}
+            onHover={(payload) => handleHover(channelIdx, payload)}
+            emptyText="No data to display"
           />
         </Item>
       {/each}
