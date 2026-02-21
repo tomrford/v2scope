@@ -2,6 +2,7 @@ import { LazyStore } from "@tauri-apps/plugin-store";
 import { writable, derived, get } from "svelte/store";
 import { DEFAULT_SETTINGS } from "../settings/defaults";
 import { SettingsSchema, type Settings } from "../settings/schema";
+import { normalizeFrameHz, computeLiveFrameFloorHz } from "../settings/live-view-limits";
 import { migrateLegacySavedPorts } from "./ports";
 
 const STORE_FILE = "settings.json";
@@ -96,7 +97,18 @@ export async function updateSetting<K extends keyof Settings>(
   key: K,
   value: Settings[K],
 ): Promise<void> {
-  settings.update((s) => ({ ...s, [key]: value }));
+  settings.update((s) => {
+    const next = { ...s, [key]: value };
+
+    if (key === "framePollingHz" || key === "liveBufferDurationS") {
+      next.framePollingHz = normalizeFrameHz(
+        next.framePollingHz,
+        next.liveBufferDurationS,
+      );
+    }
+
+    return next;
+  });
 }
 
 /**
@@ -117,6 +129,9 @@ export const pollingConfig = derived(settings, (s) => ({
   frameTimeoutMs: s.frameTimeoutMs,
   crcRetryAttempts: s.crcRetryAttempts,
 }));
+export const liveFrameFloorHz = derived(settings, (s) =>
+  computeLiveFrameFloorHz(s.liveBufferDurationS),
+);
 export const snapshotConfig = derived(settings, (s) => ({
   autoSave: s.snapshotAutoSave,
   gcDays: s.snapshotGcDays,
