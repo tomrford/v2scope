@@ -31,6 +31,20 @@
           cargoLock.lockFile = ./Cargo.lock;
           buildType = "release";
         };
+
+        libraries = with pkgs;
+          lib.optionals stdenv.isLinux [
+            webkitgtk_4_1
+            gtk3
+            libsoup_3
+            cairo
+            gdk-pixbuf
+            glib
+            dbus
+            openssl
+            librsvg
+            systemd
+          ];
       in {
         packages = {
           default = h3xyPkg;
@@ -40,7 +54,19 @@
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             rustToolchain
+            bun
           ];
+
+          nativeBuildInputs = with pkgs;
+            lib.optionals stdenv.isLinux [
+              pkg-config
+            ];
+
+          buildInputs = libraries;
+
+          shellHook = ''
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath libraries}:$LD_LIBRARY_PATH"
+          '';
         };
       }
     );

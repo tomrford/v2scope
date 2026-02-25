@@ -66,20 +66,26 @@ See `docs/plans/` for detailed specs:
 
 ## Cursor Cloud specific instructions
 
-### System dependencies (pre-installed on VM)
+### Nix-based dev environment
 
-Tauri v2 Linux system libs are required for `cargo check`/`cargo build` in `src-tauri/`:
-`libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev libudev-dev libjavascriptcoregtk-4.1-dev librsvg2-dev pkg-config build-essential`
+All tooling (Rust, Bun, pkg-config, Tauri system libs on Linux) comes from `flake.nix`. Prefix every build/run/test command with `nix develop -c` (or use the `NIX_CMD` alias below).
 
-Rust stable >= 1.85 is required (the `home` crate uses `edition2024`). The VM ships with `rustup`; ensure `rustup default stable` points to a recent enough version.
+```bash
+NIX="nix --extra-experimental-features 'nix-command flakes'"
+$NIX develop --command <cmd>       # e.g. bun install, cargo check, bun run tauri dev
+```
+
+The Nix-provided Rust toolchain links against Nix glibc, so system-installed libs (`apt`) are **not** compatible at runtime. The flake's devShell includes all native deps + sets `LD_LIBRARY_PATH` via `shellHook`.
 
 ### Running the app
 
-- **Frontend only:** `bun run dev` (Vite on port 1420)
-- **Full Tauri desktop:** `bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. Requires `$DISPLAY` (set to `:1` on Cloud VMs). Ignore `libEGL warning: DRI3` — GPU accel is unavailable in the VM but the app works fine.
-- Kill any leftover process on port 1420 before running `bun run tauri dev`; the Tauri CLI's `beforeDevCommand` (`bun run dev`) will fail if the port is occupied.
+- **Frontend only:** `nix develop -c bun run dev` (Vite on port 1420)
+- **Full Tauri desktop:** `nix develop -c bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. Requires `$DISPLAY` (set to `:1` on Cloud VMs). Ignore EGL/DRI3 warnings — GPU accel is unavailable in the VM but the app works fine.
+- Kill any leftover process on port 1420 before running `tauri dev`; the Tauri CLI's `beforeDevCommand` will fail if the port is occupied.
 
 ### Tests
+
+All commands run inside `nix develop -c`:
 
 - **TS tests:** `bun test` (uses `bun:test`; no `test` script in `package.json`)
 - **Rust tests:** `cargo test` in `src-tauri/`
@@ -90,5 +96,5 @@ Rust stable >= 1.85 is required (the `home` crate uses `edition2024`). The VM sh
 
 ### Gotchas
 
-- No physical serial device is available in the VM, so the Devices page will show "No devices found." This is expected.
-- The `flake.nix` only provides a Rust toolchain; Bun and Tauri system libs are **not** provided by Nix in this project. On Cloud VMs, use the globally installed Bun instead.
+- No physical serial device is available in the VM, so the Devices page shows "No devices found." This is expected.
+- Do **not** mix system Rust (`rustup`) with Nix-provided Rust. Always use `nix develop -c` to get consistent toolchain + libraries.
