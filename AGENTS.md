@@ -63,3 +63,32 @@ See `docs/plans/` for detailed specs:
 
 - FiniteStateMachine: actions, \_enter/\_exit, wildcard "\*", debounce; good for UI gating by sync state.
 - Context/PersistedState/StateHistory, Debounced/Throttled, watch, resource, useInterval, useEventListener, boolAttr.
+
+## Cursor Cloud specific instructions
+
+### System dependencies (pre-installed on VM)
+
+Tauri v2 Linux system libs are required for `cargo check`/`cargo build` in `src-tauri/`:
+`libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev libudev-dev libjavascriptcoregtk-4.1-dev librsvg2-dev pkg-config build-essential`
+
+Rust stable >= 1.85 is required (the `home` crate uses `edition2024`). The VM ships with `rustup`; ensure `rustup default stable` points to a recent enough version.
+
+### Running the app
+
+- **Frontend only:** `bun run dev` (Vite on port 1420)
+- **Full Tauri desktop:** `bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. Requires `$DISPLAY` (set to `:1` on Cloud VMs). Ignore `libEGL warning: DRI3` — GPU accel is unavailable in the VM but the app works fine.
+- Kill any leftover process on port 1420 before running `bun run tauri dev`; the Tauri CLI's `beforeDevCommand` (`bun run dev`) will fail if the port is occupied.
+
+### Tests
+
+- **TS tests:** `bun test` (uses `bun:test`; no `test` script in `package.json`)
+- **Rust tests:** `cargo test` in `src-tauri/`
+- **Lint:** `bun run lint` (ESLint) — pre-existing warnings may exist
+- **Type check:** `bun run check` (svelte-check + tsc)
+- **Rust check:** `cargo check` in `src-tauri/`
+- **Format check:** `bun run format:check` / `cargo fmt --check`
+
+### Gotchas
+
+- No physical serial device is available in the VM, so the Devices page will show "No devices found." This is expected.
+- The `flake.nix` only provides a Rust toolchain; Bun and Tauri system libs are **not** provided by Nix in this project. On Cloud VMs, use the globally installed Bun instead.
