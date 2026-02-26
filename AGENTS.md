@@ -68,14 +68,13 @@ See `docs/plans/` for detailed specs:
 
 ### Nix-based dev environment
 
-All tooling (Rust, Bun, pkg-config, Tauri system libs on Linux) comes from `flake.nix`. Prefix every build/run/test command with `nix develop -c` (or use the `NIX_CMD` alias below).
+All tooling (Rust, Bun, pkg-config, Tauri system libs on Linux) comes from `flake.nix`. The VM environment snapshot installs Nix, enables `nix-command flakes` in `/etc/nix/nix.conf`, and starts `nix-daemon`. All build/run/test commands must be prefixed with `nix develop -c`:
 
 ```bash
-NIX="nix --extra-experimental-features 'nix-command flakes'"
-$NIX develop --command <cmd>       # e.g. bun install, cargo check, bun run tauri dev
+nix develop -c <cmd>   # e.g. bun install, cargo check, bun run tauri dev
 ```
 
-The Nix-provided Rust toolchain links against Nix glibc, so system-installed libs (`apt`) are **not** compatible at runtime. The flake's devShell includes all native deps + sets `LD_LIBRARY_PATH` via `shellHook`.
+The Nix-provided Rust toolchain links against Nix glibc, so system-installed libs (`apt`) are **not** compatible at runtime. The flake's devShell includes all native deps and sets `LD_LIBRARY_PATH` via `shellHook`. Do **not** install Tauri system deps via `apt` — the flake provides them.
 
 ### Running the app
 
@@ -87,14 +86,15 @@ The Nix-provided Rust toolchain links against Nix glibc, so system-installed lib
 
 All commands run inside `nix develop -c`:
 
-- **TS tests:** `bun test` (uses `bun:test`; no `test` script in `package.json`)
-- **Rust tests:** `cargo test` in `src-tauri/`
-- **Lint:** `bun run lint` (ESLint) — pre-existing warnings may exist
-- **Type check:** `bun run check` (svelte-check + tsc)
-- **Rust check:** `cargo check` in `src-tauri/`
-- **Format check:** `bun run format:check` / `cargo fmt --check`
+- **TS tests:** `nix develop -c bun test` (uses `bun:test`; no `test` script in `package.json`)
+- **Rust tests:** `nix develop -c sh -c 'cd src-tauri && cargo test'`
+- **Lint:** `nix develop -c bun run lint` (ESLint) — pre-existing warnings may exist
+- **Type check:** `nix develop -c bun run check` (svelte-check + tsc)
+- **Rust check:** `nix develop -c sh -c 'cd src-tauri && cargo check'`
+- **Format check:** `nix develop -c bun run format:check` / `nix develop -c sh -c 'cd src-tauri && cargo fmt --check'`
 
 ### Gotchas
 
 - No physical serial device is available in the VM, so the Devices page shows "No devices found." This is expected.
 - Do **not** mix system Rust (`rustup`) with Nix-provided Rust. Always use `nix develop -c` to get consistent toolchain + libraries.
+- The `nix-daemon` must be running for `nix develop` to work. The update script ensures this. If `nix develop` fails with a socket error, run: `sudo /nix/var/nix/profiles/default/bin/nix-daemon &`
