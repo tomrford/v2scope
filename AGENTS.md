@@ -79,7 +79,7 @@ The Nix-provided Rust toolchain links against Nix glibc, so system-installed lib
 ### Running the app
 
 - **Frontend only:** `nix develop -c bun run dev` (Vite on port 1420)
-- **Full Tauri desktop:** `nix develop -c bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. Requires `$DISPLAY` (set to `:1` on Cloud VMs). Ignore EGL/DRI3 warnings — GPU accel is unavailable in the VM but the app works fine.
+- **Full Tauri desktop:** `DISPLAY=:1 nix develop -c bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. `$DISPLAY` must be `:1` on Cloud VMs. The flake's devShell sets `LIBGL_ALWAYS_SOFTWARE` and `WEBKIT_DISABLE_DMABUF_RENDERER` on Linux so WebKitGTK uses software EGL (no GPU needed).
 - Kill any leftover process on port 1420 before running `tauri dev`; the Tauri CLI's `beforeDevCommand` will fail if the port is occupied.
 
 ### Tests

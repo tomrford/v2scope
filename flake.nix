@@ -45,6 +45,13 @@
             librsvg
             systemd
           ];
+
+        # Mesa + libglvnd for software-rendered EGL on headless Linux (CI / cloud VMs).
+        glLibs = with pkgs;
+          lib.optionals stdenv.isLinux [
+            mesa
+            libglvnd
+          ];
       in {
         packages = {
           default = h3xyPkg;
@@ -65,7 +72,11 @@
           buildInputs = libraries;
 
           shellHook = ''
-            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath libraries}:$LD_LIBRARY_PATH"
+            export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath (libraries ++ glLibs)}:$LD_LIBRARY_PATH"
+          ''
+          + pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            export LIBGL_ALWAYS_SOFTWARE=1
+            export WEBKIT_DISABLE_DMABUF_RENDERER=1
           '';
         };
       }
