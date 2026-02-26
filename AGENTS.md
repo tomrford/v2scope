@@ -63,3 +63,38 @@ See `docs/plans/` for detailed specs:
 
 - FiniteStateMachine: actions, \_enter/\_exit, wildcard "\*", debounce; good for UI gating by sync state.
 - Context/PersistedState/StateHistory, Debounced/Throttled, watch, resource, useInterval, useEventListener, boolAttr.
+
+## Cursor Cloud specific instructions
+
+### Nix-based dev environment
+
+All tooling (Rust, Bun, pkg-config, Tauri system libs on Linux) comes from `flake.nix`. Prefix every build/run/test command with `nix develop -c` (or use the `NIX_CMD` alias below).
+
+```bash
+NIX="nix --extra-experimental-features 'nix-command flakes'"
+$NIX develop --command <cmd>       # e.g. bun install, cargo check, bun run tauri dev
+```
+
+The Nix-provided Rust toolchain links against Nix glibc, so system-installed libs (`apt`) are **not** compatible at runtime. The flake's devShell includes all native deps + sets `LD_LIBRARY_PATH` via `shellHook`.
+
+### Running the app
+
+- **Frontend only:** `nix develop -c bun run dev` (Vite on port 1420)
+- **Full Tauri desktop:** `nix develop -c bun run tauri dev` — compiles Rust + launches Vite + opens the WebKit window. Requires `$DISPLAY` (set to `:1` on Cloud VMs). Ignore EGL/DRI3 warnings — GPU accel is unavailable in the VM but the app works fine.
+- Kill any leftover process on port 1420 before running `tauri dev`; the Tauri CLI's `beforeDevCommand` will fail if the port is occupied.
+
+### Tests
+
+All commands run inside `nix develop -c`:
+
+- **TS tests:** `bun test` (uses `bun:test`; no `test` script in `package.json`)
+- **Rust tests:** `cargo test` in `src-tauri/`
+- **Lint:** `bun run lint` (ESLint) — pre-existing warnings may exist
+- **Type check:** `bun run check` (svelte-check + tsc)
+- **Rust check:** `cargo check` in `src-tauri/`
+- **Format check:** `bun run format:check` / `cargo fmt --check`
+
+### Gotchas
+
+- No physical serial device is available in the VM, so the Devices page shows "No devices found." This is expected.
+- Do **not** mix system Rust (`rustup`) with Nix-provided Rust. Always use `nix develop -c` to get consistent toolchain + libraries.
